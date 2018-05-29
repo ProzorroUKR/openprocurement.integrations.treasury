@@ -7,3 +7,5 @@ TARGET_TENDER_STATUSES = (
 )
 
 TARGET_LOT_STATUS = 'complete'
+
+retry_mult = 1000

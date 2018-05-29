@@ -305,3 +305,19 @@ def handle_esco_tenders(contract, tender):
         contract[key] = tender[key]
 
     contract['milestones'] = generate_milestones(contract, tender)
+
+
+
+def more_tenders(params, response):
+    return not (params.get('descending')
+                and not len(response.data) and params.get('offset') == response.next_page.offset)
+
+
+def valid_qualification_tender(tender):
+    return (tender['status'] == "active.qualification" and
+            tender['procurementMethodType'] in qualification_procurementMethodType)
+
+
+def valid_prequal_tender(tender):
+    return (tender['status'] == 'active.pre-qualification' and
+            tender['procurementMethodType'] in pre_qualification_procurementMethodType)
