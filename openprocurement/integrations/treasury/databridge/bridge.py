@@ -469,7 +469,7 @@ class ContractingDataBridge(object):
                         resource=self.resource
                     )
                     unsuccessful_contracts.clear()
-                gevent.sleep(self.on_error_delay)
+                gevent.sleep(float(self.on_error_delay))
             else:
                 logger.debug(
                     'Got extra info for tender {}'.format(contract[self.resource['id_key']]),

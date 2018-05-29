@@ -236,9 +236,12 @@ def fill_base_contract_data(contract, tender):
         )
 
     for item in contract.get('items', []):
-        conditions = [
-            'deliveryDate' in item, item['deliveryDate'].get('startDate'), item['deliveryDate'].get('endDate')
-        ]
+        try:
+            conditions = [
+                'deliveryDate' in item, item['deliveryDate'].get('startDate'), item['deliveryDate'].get('endDate')
+            ]
+        except KeyError:
+            conditions = [False]
 
         if all(conditions):
             if item['deliveryDate']['startDate'] > item['deliveryDate']['endDate']:
