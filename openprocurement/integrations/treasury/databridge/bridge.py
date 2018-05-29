@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
+from gevent import monkey
+
+monkey.patch_all()
 import logging.config
 import gevent
 
 from gevent import monkey, event
 from gevent.queue import Queue
 from retrying import retry
+from functools import partial
 
 try:
     from openprocurement_client.exceptions import ResourceGone, ResourceNotFound
@@ -17,6 +21,12 @@ from openprocurement_client.client import TendersClient, TendersClientSync
 
 from openprocurement.integrations.treasury.databridge.utils import journal_context
 from openprocurement.integrations.treasury.databridge import journal_msg_ids
+from openprocurement.integrations.treasury.databridge.tenders_scanner import TenderScanner
+from openprocurement.integrations.treasury.databridge.tenders_filter import TenderFilter
+
+from openprocurement.integrations.treasury.databridge.caching import Db
+from openprocurement.integrations.treasury.databridge.process_tracker import ProcessTracker
+from openprocurement.integrations.treasury.databridge.sleep_change_value import APIRateController
 
 from openprocurement.integrations.treasury.databridge.utils import (
     CacheDB,
@@ -63,54 +73,6 @@ class ContractingDataBridge(object):
         self.contracting_api_version = self.config_get('contracting_api_version')
         self.ro_api_server = self.config_get('public_tenders_api_server') or self.api_server
 
-        self.resource = dict()
-        self.init_resource()
-
-        self.client = None
-        self.tenders_sync_client = None
-        self.clients_initialize()
-
-        self.initial_sync_point = dict()
-        self.services_not_available = event.Event()
-        self.initialization_event = gevent.event.Event()
-        self.tenders_queue = Queue(maxsize=queue_size)
-        self.handicap_contracts_queue = Queue(maxsize=queue_size)
-        self.handicap_contracts_queue_retry = Queue(maxsize=queue_size)
-        self.contracts_put_queue = Queue(maxsize=queue_size)
-        self.contracts_retry_put_queue = Queue(maxsize=queue_size)
-        self.basket = dict()
-
-        self.delay = int(self.config_get('delay')) or 15
-        self.increment_step = int(self.config_get('increment_step')) or 1
-        self.decrement_step = int(self.config_get('decrement_step')) or 1
-
-    def config_get(self, name):
-        return self.config.get('app:api', name)
-
-    def init_resource(self):
-        """
-        Initialize resource-related constants to adapt to different CBD-s
-        """
-        self.resource['name'] = self.config_get('resource') or 'tenders'
-        self.resource['singular_name'] = self.resource['name'][:-1]
-        self.resource['singular_name_upper'] = self.resource['singular_name'].upper()
-        self.resource['id_key'] = '{0}_id'.format(self.resource['singular_name'])
-        self.resource['id_key_upper'] = '{0}_ID'.format(self.resource['singular_name_upper'])
-        self.resource['token_key'] = '{0}_token'.format(self.resource['singular_name'])
-
-    def clients_initialize(self):
-        self.client = TendersClient(
-            self.config_get('api_token'), host_url=self.api_server, api_version=self.api_version
-        )
-        self.contracting_client_init()
-        self.tenders_sync_client = TendersClientSync('', host_url=self.ro_api_server, api_version=self.api_version)
-
-    def contracting_client_init(self):
-        logger.info(
-            'Initialization contracting clients.',
-            extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_INFO}, {})
-        )
-
         self.contracting_client = ContractingClient(
             self.config_get('api_token'),
             host_url=self.contracting_api_server,
@@ -130,6 +92,139 @@ class ContractingDataBridge(object):
                     host_url=self.ro_api_server,
                     api_version=self.api_version,
                 )
+
+        self.resource = dict()
+        self.init_resource()
+
+        self.client = None
+        self.tenders_sync_client = None
+        # self.clients_initialize()
+
+        self.tenders_sync_client = TendersClientSync('', host_url=self.ro_api_server, api_version=self.api_version)
+        # self.db = Db(config)
+
+        self.initial_sync_point = dict()
+        self.services_not_available = event.Event()
+        self.services_not_available.set()
+        self.initialization_event = gevent.event.Event()
+        self.tenders_queue = Queue(maxsize=queue_size)
+        self.filtered_tenders_queue = Queue(maxsize=queue_size)
+        self.handicap_contracts_queue = Queue(maxsize=queue_size)
+        self.handicap_contracts_queue_retry = Queue(maxsize=queue_size)
+        self.contracts_put_queue = Queue(maxsize=queue_size)
+        self.contracts_retry_put_queue = Queue(maxsize=queue_size)
+        self.basket = dict()
+
+        self.time_to_live = self.config_get('time_to_live') or 300
+
+        self.delay = int(self.config_get('delay')) or 15
+        self.increment_step = int(self.config_get('increment_step')) or 1
+        self.decrement_step = int(self.config_get('decrement_step')) or 1
+
+        self.process_tracker = ProcessTracker(self.cache_db, self.time_to_live)
+        self.sleep_change_value = APIRateController(self.increment_step, self.decrement_step)
+        
+
+        self.tender_scanner = partial(TenderScanner.spawn,
+                        tenders_sync_client=self.tenders_sync_client,
+                        filtered_tenders_queue=self.filtered_tenders_queue,
+                        services_not_available=self.services_not_available,
+                        process_tracker=self.process_tracker,
+                        sleep_change_value=self.sleep_change_value,
+                        delay=self.delay)
+
+        
+        self.contract_scanner = partial(ContractScanner.spawn,
+                        contracts_client=self.contracts_client,
+                        filtered_contracts_queue=self.filtered_contracts_queue,
+                        services_not_available=self.services_not_available,
+                        process_tracker=self.process_tracker,
+                        sleep_change_value=self.sleep_change_value,
+                        delay=self.delay)
+
+        self.tender_filter = partial(TenderFilter.spawn,
+                                resource=self.resource,
+                                tenders_sync_client=self.tenders_sync_client,
+                                contracting_client=self.contracting_client, 
+                                contracting_client_ro=self.contracting_client_ro, 
+                                filtered_tenders_queue=self.filtered_tenders_queue,
+                                process_tracker=self.process_tracker,
+                                cache_db=self.cache_db,
+                                services_not_available=self.services_not_available,
+                                sleep_change_value=self.sleep_change_value,
+                                delay=self.delay)
+        logger.info('Initialization finished')
+
+
+    def config_get(self, name):
+        return self.config.get('app:api', name)
+    
+    def set_sleep(self):
+        self.services_not_available.clear()
+
+    def set_wake_up(self):
+        self.services_not_available.set()
+
+    def all_available(self):
+        try:
+            self.check_proxy() and self.check_openprocurement_api() and self.check_doc_service()
+        except Exception as e:
+            logger.info("Service is unavailable, message {}".format(e.message))
+            return False
+        else:
+            return True
+
+    def check_services(self):
+        if self.all_available():
+            logger.info("All services are available")
+            self.set_wake_up()
+        else:
+            logger.info("Pausing bot")
+            self.set_sleep()
+
+    def init_resource(self):
+        """
+        Initialize resource-related constants to adapt to different CBD-s
+        """
+        self.resource['name'] = self.config_get('resource') or 'tenders'
+        self.resource['singular_name'] = self.resource['name'][:-1]
+        self.resource['singular_name_upper'] = self.resource['singular_name'].upper()
+        self.resource['id_key'] = '{0}_id'.format(self.resource['singular_name'])
+        self.resource['id_key_upper'] = '{0}_ID'.format(self.resource['singular_name_upper'])
+        self.resource['token_key'] = '{0}_token'.format(self.resource['singular_name'])
+
+    # def clients_initialize(self):
+    #     self.client = TendersClient(
+    #         self.config_get('api_token'), host_url=self.api_server, api_version=self.api_version
+    #     )
+    #     # self.contracting_client_init()
+    #     self.tenders_sync_client = TendersClientSync('', host_url=self.ro_api_server, api_version=self.api_version)
+
+    # def contracting_client_init(self):
+    #     logger.info(
+    #         'Initialization contracting clients.',
+    #         extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_INFO}, {})
+    #     )
+
+    #     self.contracting_client = ContractingClient(
+    #         self.config_get('api_token'),
+    #         host_url=self.contracting_api_server,
+    #         api_version=self.contracting_api_version,
+    #     )
+
+    #     self.contracting_client_ro = self.contracting_client
+
+    #     if self.config_get('public_tenders_api_server'):
+    #         conditions = [
+    #             self.api_server == self.contracting_api_server, self.api_version == self.contracting_api_version
+    #         ]
+
+    #         if all(conditions):
+    #             self.contracting_client_ro = ContractingClient(
+    #                 '',
+    #                 host_url=self.ro_api_server,
+    #                 api_version=self.api_version,
+    #             )
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000)
     def get_tender_credentials(self, tender_id):
@@ -793,32 +888,41 @@ class ContractingDataBridge(object):
             else:
                 logger.info('Tender {} does not contain contracts to transfer'.format(tender_id))
 
-    def _start_synchronization_workers(self):
-        logger.info('Starting forward and backward sync workers')
+    # def _start_synchronization_workers(self):
+    #     logger.info('Starting forward and backward sync workers')
 
-        self.jobs = [
-            gevent.spawn(self.get_tender_contracts_backward), gevent.spawn(self.get_tender_contracts_forward)
-        ]
+    #     self.jobs = [
+    #         gevent.spawn(self.get_tender_contracts_backward), gevent.spawn(self.get_tender_contracts_forward)
+    #     ]
 
-    def _restart_synchronization_workers(self):
-        logger.warn(
-            'Restarting synchronization',
-            extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_RESTART}, {})
-        )
+    # def _restart_synchronization_workers(self):
+    #     logger.warn(
+    #         'Restarting synchronization',
+    #         extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_RESTART}, {})
+    #     )
 
-        for j in self.jobs:
-            j.kill()
+    #     for j in self.jobs:
+    #         j.kill()
 
-        self.clients_initialize()
-        self._start_synchronization_workers()
+    #     self.clients_initialize()
+    #     self._start_synchronization_workers()
+
+    def _start_jobs(self):
+        self.jobs = {'tender_scanner': self.tender_scanner(),
+                     'contract_scanner': self.contract_scanner(),
+                    #  'tender_filter': self.tender_filter()
+                     }
 
     def _start_contract_sculptors(self):
         self.immortal_jobs = {
-            'get_tender_contracts': gevent.spawn(self.get_tender_contracts),
-            'prepare_contract_data': gevent.spawn(self.prepare_contract_data),
-            'prepare_contract_data_retry': gevent.spawn(self.prepare_contract_data_retry),
-            'put_contracts': gevent.spawn(self.put_contracts),
-            'retry_put_contracts': gevent.spawn(self.retry_put_contracts)
+            'tender_scanner': gevent.spawn(self.tender_scanner),
+            'contract_scanner': gevent.spawn(self.contract_scanner),
+            # 'tender_filter': gevent.spawn(self.tender_filter),
+            # 'get_tender_contracts': gevent.spawn(self.get_tender_contracts),
+            # 'prepare_contract_data': gevent.spawn(self.prepare_contract_data),
+            # 'prepare_contract_data_retry': gevent.spawn(self.prepare_contract_data_retry),
+            # 'put_contracts': gevent.spawn(self.put_contracts),
+            # 'retry_put_contracts': gevent.spawn(self.retry_put_contracts)
         }
 
     def run(self):
@@ -827,13 +931,14 @@ class ContractingDataBridge(object):
             extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_START}, {})
         )
 
-        backward_worker, forward_worker = self.jobs
+        self._start_jobs()
+        # backward_worker, forward_worker = self.jobs
         counter = 0
 
         while True:
             gevent.sleep(float(self.jobs_watcher_delay))
 
-            if counter == 20:
+            if counter == 2:
                 logger.info(
                     'Current state: Tenders to process {}; Unhandled '
                     'contracts {}; Contracts to create {}; Retrying to '
@@ -852,11 +957,11 @@ class ContractingDataBridge(object):
                 )
                 counter = 0
             counter += 1
-            if forward_worker.dead or (backward_worker.dead and not backward_worker.successful()):
-                self._restart_synchronization_workers()
-                backward_worker, forward_worker = self.jobs
+            # if forward_worker.dead or (backward_worker.dead and not backward_worker.successful()):
+            #     self._restart_synchronization_workers()
+            #     backward_worker, forward_worker = self.jobs
 
-            for name, job in self.immortal_jobs.items():
+            for name, job in self.jobs.items():
                 if job.dead:
                     logger.warn('Restarting {} worker'.format(name))
                     if name == 'get_tender_contracts':
@@ -864,8 +969,8 @@ class ContractingDataBridge(object):
                     self.immortal_jobs[name] = gevent.spawn(getattr(self, name))
 
     def launch(self):
-        self._start_contract_sculptors()
-        self._start_synchronization_workers()
+        # self._start_contract_sculptors()
+        # self._start_synchronization_workers()
 
         try:
             self.run()

@@ -12,6 +12,7 @@ from pytz import timezone
 from iso8601 import parse_date
 from esculator.calculations import discount_rate_days, payments_days, calculate_payments
 
+from openprocurement.integrations.treasury.databridge.constants import TARGET_TENDER_STATUSES, TARGET_LOT_STATUS
 from openprocurement.integrations.treasury.databridge.journal_msg_ids import (
     DATABRIDGE_COPY_CONTRACT_ITEMS, DATABRIDGE_EXCEPTION, DATABRIDGE_MISSING_CONTRACT_ITEMS
 )
@@ -19,6 +20,10 @@ from openprocurement.integrations.treasury.databridge.journal_msg_ids import (
 TZ = timezone(os.environ['TZ'] if 'TZ' in os.environ else 'Europe/Kiev')
 logger = logging.getLogger('openprocurement.integrations.treasury.databridge')
 
+
+
+def item_key(tender_id, item_id):
+    return '{}_{}'.format(tender_id, item_id)
 
 def generate_request_id():
     return b'data-bridge-req-' + str(uuid4()).encode('ascii')
@@ -317,10 +322,16 @@ def more_tenders(params, response):
 
 
 def valid_qualification_tender(tender):
-    return (tender['status'] == "active.qualification" and
-            tender['procurementMethodType'] in qualification_procurementMethodType)
+    return tender['status'] in TARGET_TENDER_STATUSES and has_lots_or_is_complete(tender)
 
+def has_lots_or_is_complete(tender):
+    return has_complete_lots(tender) or tender['status'] == 'complete'
 
-def valid_prequal_tender(tender):
-    return (tender['status'] == 'active.pre-qualification' and
-            tender['procurementMethodType'] in pre_qualification_procurementMethodType)
+def has_complete_lots(tender):
+    return hasattr(tender, 'lots') and any([1 for lot in tender['lots'] if lot['status'] == TARGET_LOT_STATUS])
+
+def more_contracts(params, response):
+    return True
+
+def valid_contract(contract):
+    return contract['status'] == 'active'

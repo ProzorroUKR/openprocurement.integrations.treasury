@@ -8,22 +8,25 @@ import gevent
 
 from gevent import Greenlet
 
-from openprocurement.bot.identification.databridge.utils import journal_context
-from openprocurement.bot.identification.databridge.journal_msg_ids import DATABRIDGE_START_UPLOAD
+from openprocurement.integrations.treasury.databridge.utils import journal_context
+from openprocurement.integrations.treasury.databridge.journal_msg_ids import DATABRIDGE_START_UPLOAD
 
 logger = logging.getLogger(__name__)
 
 class BaseWorker(Greenlet):
     def __init__(self, services_not_available):
-        super(BaseWorker, self).__init__()
+        # super(BaseWorker, self).__init__()
+        Greenlet.__init__(self)
         self.services_not_available = services_not_available
         self.exit = False
         self.delay = 15
+        logger.info('BaseWorker successfully initialized')
 
     def _start_jobs(self):
         raise NotImplementedError()
 
     def _run(self):
+        logger.info('run?')
         self.services_not_available.wait()
         logger.info('Start {} worker'.format(type(self).__name__),
                     extra=journal_context({"MESSAGE_ID": DATABRIDGE_START_UPLOAD}, {}))
@@ -49,4 +52,4 @@ class BaseWorker(Greenlet):
 
     def shutdown(self):
         self.exit = True
-        logger.info('Worker {} complete his job.'.format(type(self).__name__))
+        logger.info('Worker {} has completed his job.'.format(type(self).__name__))
