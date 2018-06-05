@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 import unittest
 
-from openprocurement.integrations.treasury.tests import utils
+from openprocurement.integrations.treasury.tests import utils, databridge
 
 
 def suite():
     suite = unittest.TestSuite()
+    suite.addTest(databridge.suite())
     suite.addTest(utils.suite())
     return suite
 
