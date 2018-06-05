@@ -653,95 +653,95 @@ class TestDatabridge(unittest.TestCase):
         response.next_page.offset = True
         return response
     
-    # def test_get_tenders(self, *mocks):
-    #
-    #     info_calls = list()
-    #     debug_calls = list()
-    #
-    #     cb = ContractingDataBridge(self.config)
-    #     # Check initialization
-    #     msg = "Caching backend: '{}', db name: '{}', host: '{}', port: '{}'".format(
-    #         cb.cache_db._backend, cb.cache_db._db_name, cb.cache_db._host, cb.cache_db._port
-    #     )
-    #     info_calls += [
-    #         call(msg, extra={'MESSAGE_ID': j_msg.DATABRIDGE_INFO}),
-    #         call('Initialization contracting clients.', extra={'MESSAGE_ID': j_msg.DATABRIDGE_INFO})
-    #     ]
-    #
-    #     response = self._fake_response()
-    #     competitiveDialogueUA = deepcopy(self.tender)
-    #     competitiveDialogueUA['procurementMethodType'] = 'competitiveDialogueUA'
-    #     competitiveDialogueEU = deepcopy(self.tender)
-    #     competitiveDialogueEU['procurementMethodType'] = 'competitiveDialogueEU'
-    #     pending = deepcopy(self.tender)
-    #     pending['status'] = 'pending'
-    #     complete = deepcopy(self.tender)
-    #     complete['status'] = 'complete'
-    #     complete_lots = deepcopy(self.tender)
-    #     complete_lots['status'] = 'complete'
-    #     complete_lots['lots'] = [{'status': 'complete'}]
-    #     tenders = [
-    #         munchify(competitiveDialogueUA),
-    #         munchify(competitiveDialogueEU),
-    #         munchify(pending),
-    #         munchify(complete),
-    #         munchify(complete_lots),
-    #     ]
-    #     response.data = tenders
-    #     params = {'descending': True, 'offset': True}
-    #     direction = self.DIRECTION
-    #
-    #     cb.initialize_sync = MagicMock(return_value=response)
-    #     cb.tenders_sync_client = MagicMock()
-    #     cb.tenders_sync_client.sync_tenders = MagicMock(
-    #         return_value=self._fake_response()
-    #     )
-    #
-    #     for _ in cb.get_tenders(params=params, direction=direction):
-    #         pass
-    #
-    #     info_calls += [
-    #         call('Client {} params: {}'.format(direction, params)),
-    #         call(
-    #             'Skipping {} tender {}'.format(tenders[0]['procurementMethodType'], tenders[0]['id']),
-    #             extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_INFO}, params={'TENDER_ID': tenders[0]['id']})
-    #         ),
-    #         call(
-    #             'Skipping {} tender {}'.format(tenders[1]['procurementMethodType'], tenders[1]['id']),
-    #             extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_INFO}, params={'TENDER_ID': tenders[1]['id']})
-    #         ),
-    #         call(
-    #             '{} sync: Found tender in complete status {}'.format(direction.capitalize(), tenders[3]['id']),
-    #              extra=journal_context(
-    #                 {'MESSAGE_ID': j_msg.DATABRIDGE_FOUND_NOLOT_COMPLETE}, {'TENDER_ID': tenders[3]['id']}
-    #             )
-    #         ),
-    #         call(
-    #             '{} sync: Found multilot tender {} in status {}'.format(
-    #                 direction.capitalize(), tenders[4]['id'], tenders[4]['status']
-    #             ),
-    #             extra=journal_context(
-    #                 {'MESSAGE_ID': j_msg.DATABRIDGE_FOUND_MULTILOT_COMPLETE},
-    #                 {'TENDER_ID': tenders[4]['id']}
-    #             )
-    #         ),
-    #         call(
-    #             'Sleep {} sync...'.format(direction),
-    #             extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_SYNC_SLEEP})
-    #         ),
-    #         call(
-    #             'Restore {} sync'.format(direction),
-    #             extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_SYNC_RESUME})
-    #         )
-    #     ]
-    #     debug_calls += [
-    #         call('{} sync: Skipping tender {} in status {}'.format(
-    #             direction.capitalize(), tenders[2]['id'], tenders[2]['status']
-    #         ), extra=journal_context(params={"TENDER_ID": tenders[2]['id']})), call('{} {}'.format(direction, params))
-    #     ]
-    #
-    #     self.assertEqual(mocks[1].debug.mock_calls, debug_calls)
-    #     self.assertEqual(mocks[1].info.mock_calls, info_calls)
+    def test_get_tenders(self, *mocks):
+
+        info_calls = list()
+        debug_calls = list()
+
+        cb = ContractingDataBridge(self.config)
+        # Check initialization
+        msg = "Caching backend: '{}', db name: '{}', host: '{}', port: '{}'".format(
+            cb.cache_db._backend, cb.cache_db._db_name, cb.cache_db._host, cb.cache_db._port
+        )
+        info_calls += [
+            call(msg, extra={'MESSAGE_ID': j_msg.DATABRIDGE_INFO}),
+            call('Initialization contracting clients.', extra={'MESSAGE_ID': j_msg.DATABRIDGE_INFO})
+        ]
+
+        response = self._fake_response()
+        competitiveDialogueUA = deepcopy(self.tender)
+        competitiveDialogueUA['procurementMethodType'] = 'competitiveDialogueUA'
+        competitiveDialogueEU = deepcopy(self.tender)
+        competitiveDialogueEU['procurementMethodType'] = 'competitiveDialogueEU'
+        pending = deepcopy(self.tender)
+        pending['status'] = 'pending'
+        complete = deepcopy(self.tender)
+        complete['status'] = 'complete'
+        complete_lots = deepcopy(self.tender)
+        complete_lots['status'] = 'complete'
+        complete_lots['lots'] = [{'status': 'complete'}]
+        tenders = [
+            munchify(competitiveDialogueUA),
+            munchify(competitiveDialogueEU),
+            munchify(pending),
+            munchify(complete),
+            munchify(complete_lots),
+        ]
+        response.data = tenders
+        params = {'descending': True, 'offset': True}
+        direction = self.DIRECTION
+
+        cb.initialize_sync = MagicMock(return_value=response)
+        cb.tenders_sync_client = MagicMock()
+        cb.tenders_sync_client.sync_tenders = MagicMock(
+            return_value=self._fake_response()
+        )
+
+        for _ in cb.get_tenders(params=params, direction=direction):
+            pass
+
+        info_calls += [
+            call('Client {} params: {}'.format(direction, params)),
+            call(
+                'Skipping {} tender {}'.format(tenders[0]['procurementMethodType'], tenders[0]['id']),
+                extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_INFO}, params={'TENDER_ID': tenders[0]['id']})
+            ),
+            call(
+                'Skipping {} tender {}'.format(tenders[1]['procurementMethodType'], tenders[1]['id']),
+                extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_INFO}, params={'TENDER_ID': tenders[1]['id']})
+            ),
+            call(
+                '{} sync: Found tender in complete status {}'.format(direction.capitalize(), tenders[3]['id']),
+                 extra=journal_context(
+                    {'MESSAGE_ID': j_msg.DATABRIDGE_FOUND_NOLOT_COMPLETE}, {'TENDER_ID': tenders[3]['id']}
+                )
+            ),
+            call(
+                '{} sync: Found multilot tender {} in status {}'.format(
+                    direction.capitalize(), tenders[4]['id'], tenders[4]['status']
+                ),
+                extra=journal_context(
+                    {'MESSAGE_ID': j_msg.DATABRIDGE_FOUND_MULTILOT_COMPLETE},
+                    {'TENDER_ID': tenders[4]['id']}
+                )
+            ),
+            call(
+                'Sleep {} sync...'.format(direction),
+                extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_SYNC_SLEEP})
+            ),
+            call(
+                'Restore {} sync'.format(direction),
+                extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_SYNC_RESUME})
+            )
+        ]
+        debug_calls += [
+            call('{} sync: Skipping tender {} in status {}'.format(
+                direction.capitalize(), tenders[2]['id'], tenders[2]['status']
+            ), extra=journal_context(params={"TENDER_ID": tenders[2]['id']})), call('{} {}'.format(direction, params))
+        ]
+
+        self.assertEqual(mocks[1].debug.mock_calls, debug_calls)
+        self.assertEqual(mocks[1].info.mock_calls, info_calls)
     
     def _fake_generator(self, flag, items=None):
         if flag:
