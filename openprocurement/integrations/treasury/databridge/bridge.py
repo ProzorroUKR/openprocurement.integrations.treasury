@@ -32,6 +32,9 @@ monkey.patch_all()
 logger = logging.getLogger(__name__)
 
 
+INFINITY_LOOP = True
+
+
 class ContractingDataBridge(object):
     def __init__(self, config):
         super(ContractingDataBridge, self).__init__()
@@ -415,7 +418,7 @@ class ContractingDataBridge(object):
         unsuccessful_contracts = set()
         unsuccessful_contracts_limit = 10
 
-        while True:
+        while INFINITY_LOOP:
             contract = self.handicap_contracts_queue.get()
 
             try:
@@ -508,7 +511,7 @@ class ContractingDataBridge(object):
         return tender_data
 
     def prepare_contract_data_retry(self):
-        while True:
+        while INFINITY_LOOP:
             contract = self.handicap_contracts_queue_retry.get()
 
             try:
@@ -546,7 +549,7 @@ class ContractingDataBridge(object):
         unsuccessful_contracts = set()
         unsuccessful_contracts_limit = 10
 
-        while True:
+        while INFINITY_LOOP:
             contract = self.contracts_put_queue.get()
 
             try:
@@ -637,7 +640,7 @@ class ContractingDataBridge(object):
             raise
 
     def retry_put_contracts(self):
-        while True:
+        while INFINITY_LOOP:
             contract = self.contracts_retry_put_queue.get()
 
             try:
@@ -830,7 +833,7 @@ class ContractingDataBridge(object):
         backward_worker, forward_worker = self.jobs
         counter = 0
 
-        while True:
+        while INFINITY_LOOP:
             gevent.sleep(float(self.jobs_watcher_delay))
 
             if counter == 20:
