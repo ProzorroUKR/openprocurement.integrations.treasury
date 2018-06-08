@@ -7,6 +7,8 @@ import redis
 from uuid import uuid4
 from datetime import datetime, timedelta
 
+from ConfigParser import NoOptionError
+
 from decimal import Decimal
 from pytz import timezone
 from iso8601 import parse_date
@@ -51,12 +53,28 @@ class CacheDB(object):
         self._host = None
 
         self._backend = 'redis'
-        self._host = self.config.get('app:api', 'cache_host')
-        self._port = self.config.get('app:api', 'cache_port') or 6379
-        self._db_name = self.config.get('app:api', 'cache_db_name') or 0
-        self.db = redis.StrictRedis(
-            host=self._host, port=self._port, db=self._db_name
-        )
+
+        try:
+            _host = self.config.get('app:api', 'cache_host')
+        except NoOptionError:
+            _host = None
+
+        try:
+            _port = self.config.get('app:api', 'cache_port')
+        except NoOptionError:
+            _port = None
+
+        try:
+            _db_name = self.config.get('app:api', 'cache_db_name')
+        except NoOptionError:
+            _db_name = None
+
+        self._host = _host or '127.0.0.1'
+        self._port = _port or 6379
+        self._db_name = _db_name or 0
+
+        self.db = redis.StrictRedis(host=self._host, port=self._port, db=self._db_name)
+
         self.set_value = self.db.set
         self.has_value = self.db.exists
 

@@ -1,5 +1,4 @@
 from setuptools import setup, find_packages
-import os
 
 version = '1.0'
 
@@ -25,14 +24,6 @@ requires = [
 ]
 
 test_requires = requires + [
-    'webtest',
-    'python-coveralls',
-    'mock==1.0.1',
-    'requests_mock==1.3.0',
-    'bottle'
-]
-
-databridge_test_requires = requires + [
     'webtest',
     'python-coveralls',
     'mock==1.0.1',
@@ -95,10 +86,10 @@ setup(
     install_requires=requires,
     extras_require={
         'databridge': databridge_requires,
-        'databridge_test': databridge_test_requires,
         'test': test_requires,
         'api': api_requires,
         'api_test': api_test_requires
     },
+    test_suite="openprocurement.integrations.treasury.tests.main.suite",
     entry_points=entry_points
 )
