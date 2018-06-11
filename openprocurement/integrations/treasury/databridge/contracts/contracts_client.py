@@ -1,6 +1,10 @@
 from json import loads
 from munch import munchify
-from client import APIBaseClient, verify_file
+import logging.config
+from openprocurement_client.client import APIBaseClient, verify_file
+
+
+logger = logging.getLogger(__name__)
 
 
 class ContractingClient(APIBaseClient):
@@ -34,6 +38,7 @@ class ContractingClient(APIBaseClient):
     def get_contracts(self, params={}, feed='changes', extra_headers={}):
         params['feed'] = feed
         self._update_params(params)
+        logger.info('params are weird, check them out? params={}'.format(params))
         response = self.get(
             self.prefix_path,
             params_dict=self.params,

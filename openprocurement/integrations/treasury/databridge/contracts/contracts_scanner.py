@@ -43,6 +43,7 @@ class ContractsScanner(BaseWorker):
         if direction == "backward":
             self.initialization_event.clear()
             assert params['descending']
+            logger.info('params are weird, check them out? params={}'.format(params))
             response = self.contracts_client.get_contracts(params,
                                                              extra_headers={'X-Client-Request-ID': generate_request_id()})
             # set values in reverse order due to 'descending' option
@@ -66,7 +67,6 @@ class ContractsScanner(BaseWorker):
         while more_contracts(params, response):
             contracts = response.data if response else []
             params['offset'] = response.next_page.offset
-            logger.info('contracts {}'.format(contracts))
             for contract in contracts:
                 logger.info('contract {}'.format(contract))
                 if self.should_process_contract(contract):
@@ -80,7 +80,7 @@ class ContractsScanner(BaseWorker):
                         extra=journal_context({"MESSAGE_ID": DATABRIDGE_SYNC_SLEEP}))
             gevent.sleep(self.delay + self.sleep_change_value.time_between_requests)
             try:
-                response = self.contracts_client.sync_contracts(params, extra_headers={
+                response = self.contracts_client.get_contracts(params, extra_headers={
                     'X-Client-Request-ID': generate_request_id()})
                 self.sleep_change_value.decrement()
             except ResourceError as re:
@@ -97,7 +97,7 @@ class ContractsScanner(BaseWorker):
     def get_contracts_forward(self):
         self.services_not_available.wait()
         logger.info('Start forward data sync worker...')
-        params = {'opt_fields': 'status, changes, documents', 'mode': '_all_'}
+        params = {'opt_fields': 'status, changes, documents, dateSigned', 'mode': '_all_'}
         try:
             self.put_contracts_to_process(params, "forward")
         except Exception as e:
@@ -109,7 +109,7 @@ class ContractsScanner(BaseWorker):
     def get_contracts_backward(self):
         self.services_not_available.wait()
         logger.info('Start backward data sync worker...')
-        params = {'opt_fields': 'status changes, documents', 'descending': 1, 'mode': '_all_'}
+        params = {'opt_fields': 'status, changes, documents, dateSigned', 'descending': 1, 'mode': '_all_'}
         try:
             self.put_contracts_to_process(params, "backward")
         except Exception as e:
@@ -125,7 +125,7 @@ class ContractsScanner(BaseWorker):
             logger.info('Backward sync: Put contract {} to process...'.format(contract['id']),
                         extra=journal_context({"MESSAGE_ID": DATABRIDGE_CONTRACT_PROCESS},
                                               {"contract_ID": contract['id']}))
-            self.filtered_contracts_queue.put(contract['id'])
+            self.filtered_contracts_queue.put(contract)
 
     def _start_jobs(self):
         return {'get_contracts_backward': spawn(self.get_contracts_backward),

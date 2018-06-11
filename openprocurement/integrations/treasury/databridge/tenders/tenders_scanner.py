@@ -19,7 +19,7 @@ from openprocurement.integrations.treasury.databridge.utils import (
 )
 
 
-from openprocurement.integreations.treasury.databridge.base_worker import BaseWorker
+from openprocurement.integrations.treasury.databridge.base_worker import BaseWorker
 from openprocurement.integrations.treasury.databridge import constants
 from openprocurement.integrations.treasury.databridge.utils import (journal_context, more_tenders, 
     valid_qualification_tender)

@@ -29,7 +29,7 @@ from openprocurement.integrations.treasury.databridge.caching import Db
 from openprocurement.integrations.treasury.databridge.process_tracker import ProcessTracker
 from openprocurement.integrations.treasury.databridge.sleep_change_value import APIRateController
 
-from openprocurement.integrations.treasury.databridge.contract.contracts_client import ContractingClient
+from openprocurement.integrations.treasury.databridge.contracts.contracts_client import ContractingClient
 
 from openprocurement.integrations.treasury.databridge.utils import (
     CacheDB,
