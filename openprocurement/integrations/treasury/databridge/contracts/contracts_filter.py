@@ -8,7 +8,7 @@ from gevent import spawn
 from openprocurement.integrations.treasury.databridge.base_worker import BaseWorker
 from datetime import datetime
 from openprocurement.integrations.treasury.databridge.utils import (
-    generate_request_id, journal_context,
+    generate_request_id, journal_context, document_of_change,
     fill_base_contract_data)
 from openprocurement.integrations.treasury.databridge import journal_msg_ids
 try:
@@ -74,7 +74,9 @@ class ContractFilter(BaseWorker):
         gevent.sleep(1)
 
     def _put_contract_in_cache_by_contract(self, contract, contract_id):
-        logger.info('Putting info forward {}'.format(contract))
+        # logger.info('Putting info forward {}'.format(contract))
+        data_to_put_forward = (contract['id'], contract['dateSigned'], document_of_change(contract))
+        logger.info('data to put forward {}'.format(data_to_put_forward))
         date_modified = self.basket.get(contract['id'])
         if date_modified:
             self.cache_db.put(contract_id, date_modified)

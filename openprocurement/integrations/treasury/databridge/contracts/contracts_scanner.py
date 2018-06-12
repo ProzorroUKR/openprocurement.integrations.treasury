@@ -11,7 +11,8 @@ from openprocurement.integrations.treasury.databridge.constants import retry_mul
 from openprocurement.integrations.treasury.databridge.journal_msg_ids import DATABRIDGE_INFO, DATABRIDGE_SYNC_SLEEP, \
     DATABRIDGE_CONTRACT_PROCESS, DATABRIDGE_WORKER_DIED
 from openprocurement.integrations.treasury.databridge.utils import journal_context, generate_request_id, \
-    more_contracts, valid_contract
+    more_contracts, valid_contract, document_of_change
+from openprocurement.integrations.treasury.databridge.caching import contract_key
 from restkit import ResourceError
 from retrying import retry
 
@@ -68,7 +69,7 @@ class ContractScanner(BaseWorker):
             contracts = response.data if response else []
             params['offset'] = response.next_page.offset
             for contract in contracts:
-                logger.info('contract {}'.format(contract))
+                # logger.info('contract {}'.format(contract))
                 if self.should_process_contract(contract):
                     yield contract
                 else:
@@ -97,7 +98,7 @@ class ContractScanner(BaseWorker):
     def get_contracts_forward(self):
         self.services_not_available.wait()
         logger.info('Start forward data sync worker...')
-        params = {'opt_fields': 'status, changes, documents, dateSigned', 'mode': '_all_'}
+        params = {'opt_fields': 'status, changes, documents, dateSigned', 'mode': '_all_', 'feed': 'changes'}
         try:
             self.put_contracts_to_process(params, "forward")
         except Exception as e:
@@ -109,7 +110,7 @@ class ContractScanner(BaseWorker):
     def get_contracts_backward(self):
         self.services_not_available.wait()
         logger.info('Start backward data sync worker...')
-        params = {'opt_fields': 'status, changes, documents, dateSigned', 'descending': 1, 'mode': '_all_'}
+        params = {'opt_fields': 'status, changes, documents, dateSigned', 'descending': 1, 'mode': '_all_', 'feed': 'changes'}
         try:
             self.put_contracts_to_process(params, "backward")
         except Exception as e:
@@ -125,6 +126,8 @@ class ContractScanner(BaseWorker):
             logger.info('Backward sync: Put contract {} to process...'.format(contract['id']),
                         extra=journal_context({"MESSAGE_ID": DATABRIDGE_CONTRACT_PROCESS},
                                               {"contract_ID": contract['id']}))
+            self.process_tracker.put_contract(contract['id'], contract['dateModified'])
+            
             self.filtered_contracts_queue.put(contract)
 
     def _start_jobs(self):

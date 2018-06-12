@@ -135,6 +135,7 @@ class TenderScanner(BaseWorker):
             logger.info('{} sync: Put tender {} to process...'.format(direction, tender['id']),
                         extra=journal_context({"MESSAGE_ID": journal_msg_ids.DATABRIDGE_TENDER_PROCESS},
                                               {"TENDER_ID": tender['id']}))
+            self.process_tracker.put_tender(tender['id'], tender['dateModified'])                                  
             self.filtered_tenders_queue.put(tender)
 
     def _start_jobs(self):

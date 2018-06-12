@@ -11,6 +11,7 @@ from openprocurement.integrations.treasury.databridge.utils import (
     generate_request_id, journal_context,
     fill_base_contract_data, handle_common_plans, handle_esco_plans)
 from openprocurement.integrations.treasury.databridge import journal_msg_ids
+from openprocurement.integrations.treasury.databridge.caching import plan_key
 try:
     from openprocurement_client.exceptions import ResourceGone, ResourceNotFound
 except ImportError:
@@ -45,7 +46,7 @@ class PlanFilter(BaseWorker):
         date_modified = self.basket.get(contract['id'])
 
         if date_modified:
-            self.cache_db.put(plan_id, date_modified)
+            self.cache_db.put(plan_key(plan_id), date_modified)
 
         self.basket.pop(contract['id'], None)
 

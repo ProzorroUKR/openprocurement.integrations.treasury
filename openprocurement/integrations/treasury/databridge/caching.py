@@ -58,3 +58,12 @@ class Db(object):
 
 def db_key(tender_id):
     return "{}".format(tender_id)
+
+def tender_key(tender_id):
+    return "tender_{}".format(tender_id)
+
+def contract_key(contract_id):
+    return "contract_{}".format(contract_id)
+
+def plan_key(plan_id):
+    return "plan_{}".format(plan_id)

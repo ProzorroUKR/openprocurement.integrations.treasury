@@ -22,6 +22,7 @@ from openprocurement.integrations.treasury.databridge.utils import (
 
 from openprocurement.integrations.treasury.databridge.base_worker import BaseWorker
 from openprocurement.integrations.treasury.databridge import constants
+from openprocurement.integrations.treasury.databridge.caching import plan_key
 from openprocurement.integrations.treasury.databridge import journal_msg_ids
 from retrying import retry
 
@@ -132,6 +133,7 @@ class PlanScanner(BaseWorker):
             logger.info('{} sync: Put plan {} to process...'.format(direction, plan['id']),
                         extra=journal_context({"MESSAGE_ID": journal_msg_ids.DATABRIDGE_TENDER_PROCESS},
                                               {"TENDER_ID": plan['id']}))
+            self.process_tracker.put_plan(plan['id'], plan['dateModified'])
             self.filtered_plans_queue.put(plan)
 
     def _start_jobs(self):

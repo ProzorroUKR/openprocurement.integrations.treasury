@@ -354,6 +354,27 @@ def more_contracts(params, response):
 def valid_contract(contract):
     return contract['status'] == 'active'
 
+def document_of_change(contract):
+    if contract.get('changes'):
+        return change_documents(contract)
+    else:
+         return []
+
+def change_documents(contract):
+    res = []
+    for document in contract.get('documents'):
+        logger.info('documentOf {}'.format(document['documentOf']))
+        if document['documentOf'] == 'change':
+            if exists_change_with_same_id(contract, document['relatedItem']):
+                res.append(document)
+    return res
+
+def exists_change_with_same_id(contract, relatedItem):
+    for change in contract['changes']:
+        if change['id'] == relatedItem:
+            return True
+    return False
+
 def more_plans(params, response):
     return True # TODO fix
 

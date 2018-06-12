@@ -1033,9 +1033,9 @@ class ContractingDataBridge(object):
         self.jobs = {
                     #  'tender_scanner': self.tender_scanner(),
                     #  'tender_filter': self.tender_filter(),
-                    #  'contract_scanner': self.contract_scanner(),
-                    #  'contract_filter': self.contract_filter(),
-                     'plan_scanner': self.plan_scanner(),
+                     'contract_scanner': self.contract_scanner(),
+                     'contract_filter': self.contract_filter(),
+                    #  'plan_scanner': self.plan_scanner(),
                      }
 
     # def _restart_synchronization_plans_worker(self):
