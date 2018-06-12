@@ -32,7 +32,7 @@ class ContractingClient(APIBaseClient):
     def create_contract(self, contract):
         return self._create_resource_item(self.prefix_path, contract)
 
-    def get_contract(self, id, extra_headers):
+    def get_contract(self, id, extra_headers={}):
         # self._update_headers(extra_headers)
         return self._get_resource_item('{}/{}'.format(self.prefix_path, id), headers=extra_headers)
 

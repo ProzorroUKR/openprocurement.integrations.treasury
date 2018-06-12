@@ -14,15 +14,14 @@ from openprocurement.integrations.treasury.databridge.utils import (
     CacheDB,
     generate_request_id,
     fill_base_contract_data,
-    handle_common_plans,
-    handle_esco_plans
+    more_plans,
+    journal_context,
+    valid_plan
 )
 
 
-from .base_worker import BaseWorker
+from openprocurement.integrations.treasury.databridge.base_worker import BaseWorker
 from openprocurement.integrations.treasury.databridge import constants
-from openprocurement.integrations.treasury.databridge.utils import (journal_context, more_plans, 
-    valid_qualification_plan)
 from openprocurement.integrations.treasury.databridge import journal_msg_ids
 from retrying import retry
 
@@ -81,8 +80,8 @@ class PlanScanner(BaseWorker):
                 if self.should_process_plan(plan):
                     yield plan
                 else:
-                    logger.info('Skipping plan {} with status {} with procurementMethodType {}'.format(
-                        plan['id'], plan['status'], plan['procurementMethodType']),
+                    logger.info('Skipping plan {} '.format(
+                        plan['id']),
                         extra=journal_context({"MESSAGE_ID": journal_msg_ids.DATABRIDGE_INFO},
                                               params={"TENDER_ID": plan['id']}))
             logger.info('Sleep {} sync...'.format(direction),
@@ -100,13 +99,12 @@ class PlanScanner(BaseWorker):
                     raise re
 
     def should_process_plan(self, plan):
-        return (not self.process_tracker.check_processed_plans(plan['id']) and
-                (valid_qualification_plan(plan)))
+        return not self.process_tracker.check_processed_plans(plan['id']) and (valid_plan(plan))
 
     def get_plans_forward(self):
         self.services_not_available.wait()
         logger.info('Start forward data sync worker...')
-        params = {'opt_fields': 'status,lots,procurementMethodType', 'mode': '_all_'}
+        params = {'mode': '_all_'}
         try:
             self.put_plans_to_process(params, "forward")
         except Exception as e:
@@ -118,8 +116,7 @@ class PlanScanner(BaseWorker):
     def get_plans_backward(self):
         self.services_not_available.wait()
         logger.info('Start backward data sync worker...')
-
-        params = {'opt_fields': 'status,lots,procurementMethodType', 'descending': 1, 'mode': '_all_'}
+        params = {'descending': 1, 'mode': '_all_'}
         try:
             self.put_plans_to_process(params, "backward")
         except Exception as e:

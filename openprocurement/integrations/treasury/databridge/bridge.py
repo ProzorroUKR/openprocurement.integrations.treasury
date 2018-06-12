@@ -4,11 +4,13 @@ from gevent import monkey
 monkey.patch_all()
 import logging.config
 import gevent
+import datetime
 
 from gevent import monkey, event
 from gevent.queue import Queue
 from retrying import retry
 from functools import partial
+from iso8601 import parse_date
 
 try:
     from openprocurement_client.exceptions import ResourceGone, ResourceNotFound
@@ -17,6 +19,7 @@ except ImportError:
     from restkit.errors import ResourceGone
 
 from openprocurement_client.client import TendersClient, TendersClientSync
+from openprocurement_client.plan import PlansClient
 
 from openprocurement.integrations.treasury.databridge.utils import journal_context
 from openprocurement.integrations.treasury.databridge import journal_msg_ids
@@ -31,6 +34,8 @@ from openprocurement.integrations.treasury.databridge.process_tracker import Pro
 from openprocurement.integrations.treasury.databridge.sleep_change_value import APIRateController
 
 from openprocurement.integrations.treasury.databridge.contracts.contracts_client import ContractingClient
+from openprocurement.integrations.treasury.databridge.plans.plans_client import PlansClientSync
+from openprocurement.integrations.treasury.databridge.plans.plans_scanner import PlanScanner
 
 from openprocurement.integrations.treasury.databridge.utils import (
     CacheDB,
@@ -78,30 +83,37 @@ class ContractingDataBridge(object):
         self.api_version = self.config_get('tenders_api_version')
         self.contracting_api_server = self.config_get('contracting_api_server')
         self.contracting_api_version = self.config_get('contracting_api_version')
+        self.plans_api_server = self.config_get('plans_api_server')
+        self.plans_api_version = self.config_get('plans_api_version')
         self.ro_api_server = self.config_get('public_tenders_api_server') or self.api_server
-
-        self.contracting_client = ContractingClient(
-            self.config_get('api_token'),
-            host_url=self.contracting_api_server,
-            api_version=self.contracting_api_version,
-        )
-
-        self.contracting_client_ro = self.contracting_client
-
-        if self.config_get('public_tenders_api_server'):
-            conditions = [
-                self.api_server == self.contracting_api_server, self.api_version == self.contracting_api_version
-            ]
-
-            if all(conditions):
-                self.contracting_client_ro = ContractingClient(
-                    '',
-                    host_url=self.ro_api_server,
-                    api_version=self.api_version,
-                )
 
         self.resource = dict()
         self.init_resource()
+
+        self.client = None
+        self.tenders_sync_client = None
+        self.clients_initialize()
+
+        self.plans_client = None
+        self.plans_sync_client = None
+        self.plans_client_initialize()
+
+        self.initial_sync_point = dict()
+        self.initial_plans_sync_point = dict()
+        self.services_not_available = event.Event()
+        self.initialization_event = gevent.event.Event()
+        self.initialization_plans_event = gevent.event.Event()
+        self.tenders_queue = Queue(maxsize=queue_size)
+        self.plans_queue = Queue(maxsize=queue_size)
+        self.handicap_contracts_queue = Queue(maxsize=queue_size)
+        self.handicap_contracts_queue_retry = Queue(maxsize=queue_size)
+        self.contracts_put_queue = Queue(maxsize=queue_size)
+        self.contracts_retry_put_queue = Queue(maxsize=queue_size)
+        self.basket = dict()
+
+        self.delay = int(self.config_get('delay')) or 15
+        self.increment_step = int(self.config_get('increment_step')) or 1
+        self.decrement_step = int(self.config_get('decrement_step')) or 1
 
         self.client = None
         self.tenders_sync_client = None
@@ -115,6 +127,7 @@ class ContractingDataBridge(object):
         self.tenders_queue = Queue(maxsize=queue_size)
         self.filtered_tenders_queue = Queue(maxsize=queue_size)
         self.filtered_contracts_queue = Queue(maxsize=queue_size)
+        self.filtered_plans_queue = Queue(maxsize=queue_size)
         self.handicap_contracts_queue = Queue(maxsize=queue_size)
         self.handicap_contracts_queue_retry = Queue(maxsize=queue_size)
         self.contracts_put_queue = Queue(maxsize=queue_size)
@@ -129,7 +142,6 @@ class ContractingDataBridge(object):
 
         self.process_tracker = ProcessTracker(self.cache_db, self.time_to_live)
         self.sleep_change_value = APIRateController(self.increment_step, self.decrement_step)
-        
 
         self.tender_scanner = partial(TenderScanner.spawn,
                         tenders_sync_client=self.tenders_sync_client,
@@ -139,10 +151,17 @@ class ContractingDataBridge(object):
                         sleep_change_value=self.sleep_change_value,
                         delay=self.delay)
 
-        
         self.contract_scanner = partial(ContractScanner.spawn,
                         contracts_client=self.contracting_client,
                         filtered_contracts_queue=self.filtered_contracts_queue,
+                        services_not_available=self.services_not_available,
+                        process_tracker=self.process_tracker,
+                        sleep_change_value=self.sleep_change_value,
+                        delay=self.delay)
+
+        self.plan_scanner = partial(PlanScanner.spawn,
+                        plans_sync_client=self.plans_sync_client,
+                        filtered_plans_queue=self.filtered_plans_queue,
                         services_not_available=self.services_not_available,
                         process_tracker=self.process_tracker,
                         sleep_change_value=self.sleep_change_value,
@@ -163,43 +182,18 @@ class ContractingDataBridge(object):
         self.contract_filter = partial(ContractFilter.spawn,
                                 resource=self.resource,
                                 contracts_sync_client=self.contracting_client,
-                                contracting_client=self.contracting_client, 
-                                contracting_client_ro=self.contracting_client_ro, 
+                                contracting_client=self.contracting_client,
+                                contracting_client_ro=self.contracting_client_ro,
                                 filtered_contracts_queue=self.filtered_contracts_queue,
                                 process_tracker=self.process_tracker,
                                 cache_db=self.cache_db,
                                 services_not_available=self.services_not_available,
                                 sleep_change_value=self.sleep_change_value,
-                                delay=self.delay)
-        
+                                delay=self.delay)        
         logger.info('Initialization finished')
-
 
     def config_get(self, name):
         return self.config.get('app:api', name)
-    
-    def set_sleep(self):
-        self.services_not_available.clear()
-
-    def set_wake_up(self):
-        self.services_not_available.set()
-
-    def all_available(self):
-        try:
-            self.check_proxy() and self.check_openprocurement_api() and self.check_doc_service()
-        except Exception as e:
-            logger.info("Service is unavailable, message {}".format(e.message))
-            return False
-        else:
-            return True
-
-    def check_services(self):
-        if self.all_available():
-            logger.info("All services are available")
-            self.set_wake_up()
-        else:
-            logger.info("Pausing bot")
-            self.set_sleep()
 
     def init_resource(self):
         """
@@ -212,38 +206,73 @@ class ContractingDataBridge(object):
         self.resource['id_key_upper'] = '{0}_ID'.format(self.resource['singular_name_upper'])
         self.resource['token_key'] = '{0}_token'.format(self.resource['singular_name'])
 
-    # def clients_initialize(self):
-    #     self.client = TendersClient(
-    #         self.config_get('api_token'), host_url=self.api_server, api_version=self.api_version
-    #     )
-    #     # self.contracting_client_init()
-    #     self.tenders_sync_client = TendersClientSync('', host_url=self.ro_api_server, api_version=self.api_version)
+    def clients_initialize(self):
+        self.client = TendersClient(
+            self.config_get('api_token'), host_url=self.api_server, api_version=self.api_version
+        )
+        self.contracting_client_init()
+        self.tenders_sync_client = TendersClientSync('', host_url=self.ro_api_server, api_version=self.api_version)
 
-    # def contracting_client_init(self):
-    #     logger.info(
-    #         'Initialization contracting clients.',
-    #         extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_INFO}, {})
-    #     )
+    def contracting_client_init(self):
+        logger.info(
+            'Initialization contracting clients.',
+            extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_INFO}, {})
+        )
+        self.contracting_client = ContractingClient(
+            self.config_get('api_token'),
+            host_url=self.contracting_api_server,
+            api_version=self.contracting_api_version,
+        )
 
-    #     self.contracting_client = ContractingClient(
-    #         self.config_get('api_token'),
-    #         host_url=self.contracting_api_server,
-    #         api_version=self.contracting_api_version,
-    #     )
+        self.contracting_client_ro = self.contracting_client
 
-    #     self.contracting_client_ro = self.contracting_client
+        if self.config_get('public_tenders_api_server'):
+            conditions = [
+                self.api_server == self.contracting_api_server, self.api_version == self.contracting_api_version
+            ]
 
-    #     if self.config_get('public_tenders_api_server'):
-    #         conditions = [
-    #             self.api_server == self.contracting_api_server, self.api_version == self.contracting_api_version
-    #         ]
+            if all(conditions):
+                self.contracting_client_ro = ContractingClient(
+                    '',
+                    host_url=self.ro_api_server,
+                    api_version=self.api_version,
+                )
+        self.resource = dict()
+        self.init_resource()
 
-    #         if all(conditions):
-    #             self.contracting_client_ro = ContractingClient(
-    #                 '',
-    #                 host_url=self.ro_api_server,
-    #                 api_version=self.api_version,
-    #             )
+    def plans_client_initialize(self):
+        self.plans_client = PlansClient(
+            self.config_get('api_token'), host_url=self.api_server, api_version=self.api_version
+        )
+
+        self.plans_client_init()
+        self.plans_sync_client = PlansClientSync('', host_url=self.ro_api_server, api_version=self.api_version)
+
+    def plans_client_init(self):
+        logger.info(
+            'Initialization plans clients.',
+            extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_INFO}, {})
+        )
+
+        self.plans_client = PlansClient(
+            self.config_get('api_token'),
+            host_url=self.plans_api_server,
+            api_version=self.plans_api_version
+        )
+
+        self.plans_client_ro = self.plans_client
+
+        if self.config_get('public_tenders_api_server'):
+            conditions = [
+                self.api_server == self.plans_api_server, self.api_version == self.plans_api_version
+            ]
+
+            if all(conditions):
+                self.plans_client_ro = PlansClient(
+                    '',
+                    host_url=self.ro_api_server,
+                    api_version=self.api_version
+                )
 
     # @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000)
     # def get_tender_credentials(self, tender_id):
@@ -297,6 +326,74 @@ class ContractingDataBridge(object):
     #         return self.tenders_sync_client.sync_tenders(
     #             params, extra_headers={'X-Client-Request-ID': generate_request_id()}
     #         )
+
+    def initialize_plans_sync(self, params=None, direction=None):
+        self.initialization_plans_event.clear()
+
+        if direction == 'backward':
+            assert params.get('descending')
+
+            response = self.plans_sync_client.sync_plans(
+                params, extra_headers={'X-Client-Request-ID': generate_request_id()}
+            )
+
+            self.initial_plans_sync_point = {
+                'forward_offset': response.prev_page.offset,
+                'backward_offset': response.next_page.offset
+            }
+            self.initialization_plans_event.set()
+            logger.info('Initial plans sync point {}'.format(self.initial_sync_point))
+            return response
+
+    def get_plans(self, params=None, direction=None):
+        if params is None:
+            params = {}
+
+        if direction is None:
+            direction = str()
+
+        response = self.initialize_plans_sync(params=params, direction=direction)
+
+        params['offset'] = response.next_page.offset
+
+        conditions = [
+            params.get('descending'), not len(response.data), params.get('offset') == response.next_page.offset
+        ]
+
+        while not all(conditions):
+            plans_list = response.data
+
+            params['offset'] = response.next_page.offset
+
+            delay = self.empty_stack_sync_delay
+
+            if plans_list:
+                delay = self.full_stack_sync_delay
+                logger.info('Plans client {} params: {}'.format(direction, params))
+
+            for plan in plans_list:
+                iso_dt = parse_date(plan['dateModified'])
+
+                if datetime.datetime.now().year == iso_dt.year:
+                    yield plan
+
+            logger.info(
+                'Sleep {} plans sync...'.format(direction),
+                extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_SYNC_SLEEP})
+            )
+
+            gevent.sleep(float(delay))
+
+            logger.info(
+                'Restore {} plans sync'.format(direction),
+                extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_SYNC_RESUME})
+            )
+
+            logger.debug('{} {}'.format(direction, params))
+
+            response = self.plans_sync_client.sync_plans(
+                params, extra_headers={'X-Client-Request-ID': generate_request_id()}
+            )
 
     # def get_tenders(self, params=None, direction=None):
     #     if params is None:
@@ -508,6 +605,102 @@ class ContractingDataBridge(object):
     #                     handle_common_tenders(contract, tender)
 
     #                 self.handicap_contracts_queue.put(contract)
+
+    def _get_filtered_plans(self):
+        plan_to_sync = self.plans_queue.get()
+
+        try:
+            plan = self.plans_sync_client.get_plan(plan_to_sync['id'])['data']
+        except Exception as e:
+            logger.warn(
+                'Fail to get plan info {}'.format(plan_to_sync['id']),
+                extra=journal_context(
+                    {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION},
+                    params={self.resource['id_key_upper']: plan_to_sync['id']}
+                )
+            )
+            logger.exception(e)
+            logger.info(
+                'Put plan {} back to plans queue'.format(plan_to_sync['id']),
+                extra=journal_context(
+                    {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION},
+                    params={self.resource['id_key_upper']: plan_to_sync['id']}
+                )
+            )
+            self.plans_queue.put(plan_to_sync)
+            gevent.sleep(float(self.on_error_delay))
+        else:
+            try:
+                if not self.cache_db.has(plan['id']):
+                    self.plans_client_ro.get_plan(plan['id'])
+                else:
+                    logger.info(
+                        'Plan {} exists in local db'.format(plan['id']),
+                        extra=journal_context(
+                            {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_CACHED},
+                            params={'PLAN_ID': plan['id']}
+                        )
+                    )
+            except ResourceNotFound:
+                logger.info(
+                    'Sync plan {}'.format(plan['id']),
+                    extra=journal_context(
+                        {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_PLAN_TO_SYNC},
+                        {'PLAN_ID': plan['id']}
+                    )
+                )
+            except Exception as e:
+                logger.warn(
+                    'Fail to plan existance {}'.format(plan['id']),
+                    extra=journal_context(
+                        {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION},
+                        params={
+                            self.resource['id_key_upper']: plan_to_sync['id'],
+                            'PLAN_ID': plan['id']
+                        }
+                    )
+                )
+                logger.exception(e)
+                logger.info(
+                    'Put plan {} back to plans queue'.format(plan_to_sync['id']),
+                    extra=journal_context(
+                        {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION},
+                        params={
+                            self.resource['id_key_upper']: plan_to_sync['id'],
+                            'PLAN_ID': plan['id']
+                        }
+                    )
+                )
+                self.plans_queue.put(plan_to_sync)
+
+                raise
+            else:
+                self.cache_db.put(plan['id'], True)
+
+                logger.info(
+                    'Plan exists {}'.format(plan['id']),
+                    extra=journal_context(
+                        {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_CONTRACT_EXISTS},
+                        {self.resource['id_key_upper']: plan_to_sync['id'], 'PLAN_ID': plan['id']}
+                    )
+                )
+
+    def get_filtered_plans(self):
+        while True:
+            try:
+                self._get_filtered_plans()
+            except Exception as e:
+                logger.warn(
+                    'Fail to handle plans',
+                    extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION}, {})
+                )
+
+                logger.exception(e)
+                gevent.sleep(float(self.on_error_delay))
+
+                raise
+
+            gevent.sleep(1)
 
     # def get_tender_contracts(self):
     #     while True:
@@ -748,164 +941,76 @@ class ContractingDataBridge(object):
     #     except Exception as e:
     #         logger.exception(e)
 
-    #         raise
 
-    # def retry_put_contracts(self):
-    #     while INFINITY_LOOP:
-    #         contract = self.contracts_retry_put_queue.get()
+    # def config_get(self, name):
+    #     return self.config.get('app:api', name)
+    def set_sleep(self):
+        self.services_not_available.clear()
 
-    #         try:
-    #             self._put_with_retry(contract)
+    def set_wake_up(self):
+        self.services_not_available.set()
 
-    #             logger.info(
-    #                 'Successfully created contract {} of tender {}'.format(
-    #                     contract['id'], contract[self.resource['id_key']]
-    #                 ),
-    #                 extra=journal_context(
-    #                     {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_CONTRACT_CREATED},
-    #                     {
-    #                         'CONTRACT_ID': contract['id'],
-    #                         self.resource['id_key_upper']: contract[self.resource['id_key']]
-    #                     }
-    #                 )
-    #             )
-    #         except Exception:
-    #             logger.warn(
-    #                 'Can\'t create contract {}'.format(contract['id']),
-    #                 extra=journal_context(
-    #                     {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION},
-    #                     {
-    #                         self.resource['id_key_upper']: contract[self.resource['id_key']],
-    #                         'CONTRACT_ID': contract['id']
-    #                     }
-    #                 )
-    #             )
-    #         else:
-    #             self.cache_db.put(contract['id'], True)
-    #             self._put_tender_in_cache_by_contract(contract, contract[self.resource['id_key']])
+    def get_plans_backward(self):
+        logger.info('Start backward plans data sync worker...')
+        params = {'descending': 1}
 
-    #         gevent.sleep(0)
+        try:
+            for plan_data in self.get_plans(params=params, direction='backward'):
+                stored = self.cache_db.get(plan_data['id'])
 
-    # def get_tender_contracts_forward(self):
-    #     logger.info('Start forward data sync worker...')
-    #     params = {'opt_fields': 'status,lots,procurementMethodType', 'mode': '_all_'}
+                if stored and stored == plan_data['dateModified']:
+                    logger.info(
+                        'Plan {} not modified from last check. Skipping'.format(plan_data['id']),
+                        extra=journal_context(
+                            {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_SKIP_NOT_MODIFIED},
+                            {self.resource['id_key_upper']: plan_data['id']}
+                        )
+                    )
 
+                    continue
+                logger.info(
+                    'Backward sync: Put plan {} to process...'.format(plan_data['id']),
+                    extra=journal_context(
+                        {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_TENDER_PROCESS},
+                        {self.resource['id_key_upper']: plan_data['id']}
+                    )
+                )
+
+                self.plans_queue.put(plan_data)
+        except Exception as e:
+            logger.warn(
+                'Backward plans worker died!',
+                extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_WORKER_DIED}, {})
+            )
+            logger.exception(e)
+            raise
+        else:
+            logger.info('Backward plans data sync finished.')
+
+    def get_tender_contracts_backward(self):
+        logger.info('Start backward data sync worker...')
+        params = {'opt_fields': 'status,lots,procurementMethodType', 'descending': 1, 'mode': '_all_'}
+
+    # def all_available(self):
     #     try:
-    #         for tender_data in self.get_tenders(params=params, direction='forward'):
-    #             logger.info(
-    #                 'Forward sync: Put tender {} to process...'.format(tender_data['id']),
-    #                 extra=journal_context(
-    #                     {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_TENDER_PROCESS},
-    #                     {self.resource['id_key_upper']: tender_data['id']}
-    #                 )
-    #             )
-    #             self.tenders_queue.put(tender_data)
+    #         self.check_proxy() and self.check_openprocurement_api() and self.check_doc_service()
     #     except Exception as e:
-    #         logger.warn(
-    #             'Forward worker died!',
-    #             extra=journal_context({"MESSAGE_ID": journal_msg_ids.DATABRIDGE_WORKER_DIED}, {})
-    #         )
-    #         logger.exception(e)
-
-    #         raise
+    #         logger.info("Service is unavailable, message {}".format(e.message))
+    #         return False
     #     else:
-    #         logger.warn(
-    #             'Forward data sync finished!',
-    #             extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_WORKER_DIED}, {})
-    #         )
+    #         return True
 
-    # def get_tender_contracts_backward(self):
-    #     logger.info('Start backward data sync worker...')
-    #     params = {'opt_fields': 'status,lots,procurementMethodType', 'descending': 1, 'mode': '_all_'}
-
-    #     try:
-    #         for tender_data in self.get_tenders(params=params, direction='backward'):
-    #             stored = self.cache_db.get(tender_data['id'])
-
-    #             if stored and stored == tender_data['dateModified']:
-    #                 logger.info(
-    #                     'Tender {} not modified from last check. Skipping'.format(tender_data['id']),
-    #                     extra=journal_context(
-    #                         {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_SKIP_NOT_MODIFIED},
-    #                         {self.resource['id_key_upper']: tender_data['id']}
-    #                     )
-    #                 )
-
-    #                 continue
-    #             logger.info(
-    #                 'Backward sync: Put tender {} to process...'.format(tender_data['id']),
-    #                 extra=journal_context(
-    #                     {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_TENDER_PROCESS},
-    #                     {self.resource['id_key_upper']: tender_data['id']}
-    #                 )
-    #             )
-
-    #             self.tenders_queue.put(tender_data)
-    #     except Exception as e:
-    #         logger.warn(
-    #             'Backward worker died!',
-    #             extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_WORKER_DIED}, {})
-    #         )
-    #         logger.exception(e)
-
-    #         raise
+    # def check_services(self):
+    #     if self.all_available():
+    #         logger.info("All services are available")
+    #         self.set_wake_up()
     #     else:
-    #         logger.info('Backward data sync finished.')
-
-    # def sync_single_tender(self, tender_id):
-    #     transferred_contracts = list()
-
-    #     try:
-    #         logger.info('Getting tender {}'.format(tender_id))
-    #         tender = self.tenders_sync_client.get_tender(tender_id)['data']
-    #         logger.info('Got tender {} in status {}'.format(tender['id'], tender['status']))
-
-    #         logger.info('Getting tender {} credentials'.format(tender_id))
-    #         tender_credentials = self.get_tender_credentials(tender_id)['data']
-    #         logger.info('Got tender {} credentials'.format(tender_id))
-
-    #         for contract in tender.get('contracts', []):
-    #             if contract['status'] != 'active':
-    #                 logger.info('Skip contract {} in status {}'.format(contract['id'], contract['status']))
-    #                 continue
-
-    #             logger.info('Checking if contract {} already exists'.format(contract['id']))
-
-    #             try:
-    #                 self.contracting_client.get_contract(contract['id'])
-    #             except ResourceNotFound:
-    #                 logger.info('Contract {} does not exists. Prepare contract for creation.'.format(contract['id']))
-    #             else:
-    #                 logger.info('Contract exists {}'.format(contract['id']))
-    #                 continue
-
-    #             logger.info('Extending contract {} with extra data'.format(contract['id']))
-
-    #             if tender.get('mode'):
-    #                 contract['mode'] = tender['mode']
-
-    #             contract[self.resource['id_key']] = tender['id']
-    #             contract['procuringEntity'] = tender['procuringEntity']
-    #             contract['owner'] = tender['owner']
-    #             contract[self.resource['token_key']] = tender_credentials[self.resource['token_key']]
-
-    #             data = {'data': contract.toDict()}
-
-    #             logger.info('Creating contract {}'.format(contract['id']))
-    #             response = self.contracting_client.create_contract(data)
-
-    #             assert 'data' in response
-
-    #             logger.info('Contract {} created'.format(contract['id']))
-    #             transferred_contracts.append(contract['id'])
-    #     except Exception as e:
-    #         logger.exception(e)
-    #         raise
-    #     else:
-    #         if transferred_contracts:
-    #             logger.info('Successfully transferred contracts: {}'.format(transferred_contracts))
-    #         else:
-    #             logger.info('Tender {} does not contain contracts to transfer'.format(tender_id))
+    #         logger.info("Pausing bot")
+    #         self.set_sleep()
+            # if transferred_contracts:
+            #     logger.info('Successfully transferred contracts: {}'.format(transferred_contracts))
+            # else:
+            #     logger.info('Tender {} does not contain contracts to transfer'.format(tender_id))
 
     # def _start_synchronization_workers(self):
     #     logger.info('Starting forward and backward sync workers')
@@ -914,36 +1019,43 @@ class ContractingDataBridge(object):
     #         gevent.spawn(self.get_tender_contracts_backward), gevent.spawn(self.get_tender_contracts_forward)
     #     ]
 
+    # def _start_synchronization_plans_worker(self):
+    #     logger.info('Starting plans sync worker')
+    #     self.plans_job = gevent.spawn(self.get_plans_backward)
+
     # def _restart_synchronization_workers(self):
     #     logger.warn(
     #         'Restarting synchronization',
     #         extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_RESTART}, {})
     #     )
 
-    #     for j in self.jobs:
-    #         j.kill()
-
-    #     self.clients_initialize()
-    #     self._start_synchronization_workers()
-
     def _start_jobs(self):
         self.jobs = {
                     #  'tender_scanner': self.tender_scanner(),
-                     'contract_scanner': self.contract_scanner(),
-                     'contract_filter': self.contract_filter(),
-                    #  'tender_filter': self.tender_filter()
+                    #  'tender_filter': self.tender_filter(),
+                    #  'contract_scanner': self.contract_scanner(),
+                    #  'contract_filter': self.contract_filter(),
+                     'plan_scanner': self.plan_scanner(),
                      }
+
+    # def _restart_synchronization_plans_worker(self):
+    #     logger.warn(
+    #         'Restarting synchronization plans worker',
+    #         extra=journal_context({'MESSAGE_ID': journal_msg_ids.DATABRIDGE_RESTART}, {})
+    #     )
+
+    #     self.plans_job.kill()
+
+    #     self.plans_client_initialize()
+    #     self._start_synchronization_plans_worker()
 
     def _start_contract_sculptors(self):
         self.immortal_jobs = {
-            'tender_scanner': gevent.spawn(self.tender_scanner),
-            'contract_scanner': gevent.spawn(self.contract_scanner),
             # 'tender_filter': gevent.spawn(self.tender_filter),
             # 'get_tender_contracts': gevent.spawn(self.get_tender_contracts),
-            # 'prepare_contract_data': gevent.spawn(self.prepare_contract_data),
-            # 'prepare_contract_data_retry': gevent.spawn(self.prepare_contract_data_retry),
             # 'put_contracts': gevent.spawn(self.put_contracts),
             # 'retry_put_contracts': gevent.spawn(self.retry_put_contracts)
+            # 'get_filtered_plans': gevent.spawn(self.get_filtered_plans),
         }
 
     def run(self):
@@ -954,6 +1066,7 @@ class ContractingDataBridge(object):
 
         self._start_jobs()
         # backward_worker, forward_worker = self.jobs
+        # backward_plans_worker = self.plans_job
         counter = 0
 
         while INFINITY_LOOP:
@@ -983,22 +1096,32 @@ class ContractingDataBridge(object):
             #     backward_worker, forward_worker = self.jobs
 
             for name, job in self.jobs.items():
-                if job.dead:
-                    logger.warn('Restarting {} worker'.format(name))
-                    if name == 'get_tender_contracts':
-                        self.contracting_client_init()
-                    self.immortal_jobs[name] = gevent.spawn(getattr(self, name))
+                # if backward_plans_worker.dead and not backward_plans_worker.successful():
+                #     self._restart_synchronization_plans_worker()
+                #     backward_plans_worker = self.plans_job
+
+                for name, job in self.jobs.items():
+                    if job.dead:
+                        logger.warn('Restarting {} worker'.format(name))
+                        if name == 'get_tender_contracts':
+                            self.contracting_client_init()
+                        self.jobs[name] = gevent.spawn(getattr(self, name))
 
     def launch(self):
+        pass
         # self._start_contract_sculptors()
         # self._start_synchronization_workers()
+        # self._start_contract_sculptors()
+        # self._start_synchronization_workers()
+        # self._start_synchronization_plans_worker()
 
         try:
             self.run()
         except KeyboardInterrupt:
             logger.info('Exiting...')
             gevent.killall(self.jobs, timeout=5)
-            gevent.killall(self.immortal_jobs, timeout=5)
+            # gevent.killall(self.plans_job, timeout=5)
+            # gevent.killall(self.immortal_jobs, timeout=5)
         except Exception as e:
             logger.exception(e)
 

@@ -40,8 +40,7 @@ class PlanFilter(BaseWorker):
         self.filtered_plans_queue = filtered_plans_queue
         self.sleep_change_value = sleep_change_value
         self.basket = dict()
-    
-    
+
     def _put_plan_in_cache_by_contract(self, contract, plan_id):
         date_modified = self.basket.get(contract['id'])
 

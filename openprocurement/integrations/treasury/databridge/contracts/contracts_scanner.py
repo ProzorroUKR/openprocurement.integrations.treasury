@@ -58,7 +58,7 @@ class ContractScanner(BaseWorker):
             self.initialization_event.wait()
             params['offset'] = self.initial_sync_point['forward_offset']
             logger.info("Starting forward sync from offset {}".format(params['offset']))
-            return self.contracts_client.sync_contracts(params,
+            return self.contracts_client.get_contracts(params,
                                                         extra_headers={'X-Client-Request-ID': generate_request_id()})
 
     def get_contracts(self, params={}, direction=""):

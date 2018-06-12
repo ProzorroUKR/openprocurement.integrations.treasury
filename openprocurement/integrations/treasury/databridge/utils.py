@@ -353,3 +353,9 @@ def more_contracts(params, response):
 
 def valid_contract(contract):
     return contract['status'] == 'active'
+
+def more_plans(params, response):
+    return True # TODO fix
+
+def valid_plan(plan):
+    return True # TODO fix

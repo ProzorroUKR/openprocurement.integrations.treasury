@@ -46,6 +46,9 @@ class ProcessTracker(object):
     def check_processed_contracts(self, contract_id):
         return self._db.has(db_key(contract_id)) or False
 
+    def check_processed_plans(self, plan_id):
+        return self._db.has(db_key(plan_id)) or False
+
     def get_unprocessed_items(self):
         return self._db.get_items("unprocessed_*") or []
 
