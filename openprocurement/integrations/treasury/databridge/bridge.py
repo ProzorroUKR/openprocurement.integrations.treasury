@@ -23,7 +23,8 @@ from openprocurement.integrations.treasury.databridge import journal_msg_ids
 from openprocurement.integrations.treasury.databridge.tenders.tenders_scanner import TenderScanner
 from openprocurement.integrations.treasury.databridge.tenders.tenders_filter import TenderFilter
 
-from openprocurement.integrations.treasury.databridge.contracts.contracts_scanner import ContractsScanner
+from openprocurement.integrations.treasury.databridge.contracts.contracts_scanner import ContractScanner
+from openprocurement.integrations.treasury.databridge.contracts.contracts_filter import ContractFilter
 
 from openprocurement.integrations.treasury.databridge.caching import Db
 from openprocurement.integrations.treasury.databridge.process_tracker import ProcessTracker
@@ -139,7 +140,7 @@ class ContractingDataBridge(object):
                         delay=self.delay)
 
         
-        self.contract_scanner = partial(ContractsScanner.spawn,
+        self.contract_scanner = partial(ContractScanner.spawn,
                         contracts_client=self.contracting_client,
                         filtered_contracts_queue=self.filtered_contracts_queue,
                         services_not_available=self.services_not_available,
@@ -158,6 +159,19 @@ class ContractingDataBridge(object):
                                 services_not_available=self.services_not_available,
                                 sleep_change_value=self.sleep_change_value,
                                 delay=self.delay)
+
+        self.contract_filter = partial(ContractFilter.spawn,
+                                resource=self.resource,
+                                contracts_sync_client=self.contracting_client,
+                                contracting_client=self.contracting_client, 
+                                contracting_client_ro=self.contracting_client_ro, 
+                                filtered_contracts_queue=self.filtered_contracts_queue,
+                                process_tracker=self.process_tracker,
+                                cache_db=self.cache_db,
+                                services_not_available=self.services_not_available,
+                                sleep_change_value=self.sleep_change_value,
+                                delay=self.delay)
+        
         logger.info('Initialization finished')
 
 
@@ -916,6 +930,7 @@ class ContractingDataBridge(object):
         self.jobs = {
                     #  'tender_scanner': self.tender_scanner(),
                      'contract_scanner': self.contract_scanner(),
+                     'contract_filter': self.contract_filter(),
                     #  'tender_filter': self.tender_filter()
                      }
 

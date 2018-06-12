@@ -18,12 +18,12 @@ from retrying import retry
 logger = logging.getLogger(__name__)
 
 
-class ContractsScanner(BaseWorker):
+class ContractScanner(BaseWorker):
     """ Edr API Data Bridge """
 
     def __init__(self, contracts_client, filtered_contracts_queue, services_not_available, process_tracker,
                  sleep_change_value, delay=15):
-        super(ContractsScanner, self).__init__(services_not_available)
+        super(ContractScanner, self).__init__(services_not_available)
         self.start_time = datetime.now()
         self.delay = delay
         # init clients
