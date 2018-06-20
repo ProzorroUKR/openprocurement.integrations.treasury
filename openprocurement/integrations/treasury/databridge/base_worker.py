@@ -7,6 +7,7 @@ import logging.config
 import gevent
 
 from gevent import Greenlet
+from datetime import datetime
 
 from openprocurement.integrations.treasury.databridge.utils import journal_context
 from openprocurement.integrations.treasury.databridge.journal_msg_ids import DATABRIDGE_START_UPLOAD
@@ -18,6 +19,7 @@ class BaseWorker(Greenlet):
         # super(BaseWorker, self).__init__()
         Greenlet.__init__(self)
         self.services_not_available = services_not_available
+        self.start_time = datetime.now()
         self.exit = False
         self.delay = 15
         logger.info('BaseWorker successfully initialized')

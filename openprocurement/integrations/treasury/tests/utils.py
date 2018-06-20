@@ -9,6 +9,7 @@ from iso8601 import parse_date
 from mock import patch, call
 from pytz import timezone
 from uuid import uuid4
+from gevent import sleep as gsleep
 
 from openprocurement.integrations.treasury.databridge.journal_msg_ids import (
     DATABRIDGE_COPY_CONTRACT_ITEMS,
@@ -24,6 +25,9 @@ from openprocurement.integrations.treasury.databridge.utils import (
 
 PWD = os.path.dirname(os.path.realpath(__file__))
 TZ = timezone(os.environ['TZ'] if 'TZ' in os.environ else 'Europe/Kiev')
+
+def custom_sleep(seconds=0):
+    return gsleep(seconds=0)
 
 
 @patch('openprocurement.integrations.treasury.databridge.utils.logger')

@@ -940,10 +940,6 @@ class ContractingDataBridge(object):
     #         self.contracting_client.create_contract(data)
     #     except Exception as e:
     #         logger.exception(e)
-
-
-    # def config_get(self, name):
-    #     return self.config.get('app:api', name)
     def set_sleep(self):
         self.services_not_available.clear()
 
