@@ -46,16 +46,16 @@ class TenderFormer(object):
         i = 0
         for file in data.documents:
             i += 1
-            new_file = SubElement(documents, 'file'+i)
+            new_file = SubElement(documents, 'file'+str(i))
             new_file.text = file
-        report = SubElement(request, 'Report')
+        # report = SubElement(request, 'Report')
         # plans = SubElement(request, 'Plans') 
         # TODO eventually there will be plans 
         bids = SubElement(request, 'Bids')
         i = 0
         for bid in data.bids:
             i += 1
-            new_bid = SubElement(bids, 'bid'+i)
+            new_bid = SubElement(bids, 'bid'+str(i))
             new_bid.text = bid
         logger.info("Request {} is valid? {}".format(request_id, self.is_valid(request)))
         return request

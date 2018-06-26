@@ -5,16 +5,18 @@ import os
 import redis
 
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 
 from ConfigParser import NoOptionError
-
+from json import loads
 from decimal import Decimal
 from pytz import timezone
+from restkit import ResourceError
 from iso8601 import parse_date
+from string import digits, uppercase
 from esculator.calculations import discount_rate_days, payments_days, calculate_payments
 
-from openprocurement.integrations.treasury.databridge.constants import TARGET_TENDER_STATUSES, TARGET_LOT_STATUS
+from openprocurement.integrations.treasury.databridge.constants import TARGET_TENDER_STATUSES, TARGET_LOT_STATUS, HOLIDAYS_FILE
 from openprocurement.integrations.treasury.databridge.journal_msg_ids import (
     DATABRIDGE_COPY_CONTRACT_ITEMS, DATABRIDGE_EXCEPTION, DATABRIDGE_MISSING_CONTRACT_ITEMS
 )
@@ -380,3 +382,63 @@ def more_plans(params, response):
 
 def valid_plan(plan):
     return True # TODO fix
+
+def check_412(func):
+    def func_wrapper(obj, *args, **kwargs):
+        try:
+            response = func(obj, *args, **kwargs)
+        except ResourceError as re:
+            if re.status_int == 412:
+                obj.headers['Cookie'] = re.response.headers['Set-Cookie']
+                response = func(obj, *args, **kwargs)
+            else:
+                raise ResourceError(re)
+        return response
+
+    return func_wrapper
+
+
+def read_json(name):
+    curr_dir = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(curr_dir, name)
+    with open(file_path) as lang_file:
+        data = lang_file.read()
+    return loads(data)
+
+def to_base36(number):
+    """Converts an integer to a base36 string."""
+    alphabet = digits + uppercase
+    base36 = ''
+    sign = ''
+    if number < 0:
+        sign = '-'
+        number = -number
+
+    if 0 <= number < len(alphabet):
+        return sign + alphabet[number]
+
+    while number != 0:
+        number, i = divmod(number, len(alphabet))
+        base36 = alphabet[i] + base36
+
+    return sign + base36
+
+
+def business_date_checker():
+    current_date = datetime.now(TZ)
+    holidays = read_json(HOLIDAYS_FILE)
+    if cond1(current_date, holidays) or cond2(current_date, holidays):
+        return False
+    else:
+        if time(9, 0) <= current_date.time() <= time(18, 0):
+            return True
+        else:
+            return False
+
+
+def cond1(current_date, holidays):
+    return current_date.weekday() in [5, 6] and holidays.get(current_date.date().isoformat(), True)
+
+
+def cond2(current_date, holidays):
+    return holidays.get(current_date.date().isoformat(), False)

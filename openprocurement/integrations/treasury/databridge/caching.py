@@ -1,7 +1,7 @@
 # coding=utf-8
 
 from logging import getLogger
-from ConfigParser import NoOptionError
+from ConfigParser import NoOptionError, SafeConfigParser, ConfigParser
 
 LOGGER = getLogger(__name__)
 
@@ -16,11 +16,13 @@ class Db(object):
         self._db_name = None
         self._port = None
         self._host = None
+        LOGGER.info('config: {}'.format(self.config))
         try:
             self.config.get('app:api', 'cache_host')
             import redis
             self._backend = "redis"
             self._host = self.config_get('cache_host')
+            LOGGER.info('self._host: {}'.format(self._host))
             self._port = self.config_get('cache_port') or 6379
             self._db_name = self.config_get('cache_db_name') or 0
             self.db = redis.StrictRedis(host=self._host, port=self._port, db=self._db_name)
@@ -34,7 +36,11 @@ class Db(object):
             self.remove_value = lambda x: None
 
     def config_get(self, name):
-        return self.config.get('app:api', name)
+        LOGGER.info('config_get: {}'.format(name))
+        if isinstance(self.config, ConfigParser):
+            return self.config.get('app:api', name)
+        else:
+            return self.config['app:api'][name]
 
     def get(self, key):
         LOGGER.info("Getting item {} from the cache".format(key))
@@ -49,6 +55,7 @@ class Db(object):
         self.set_value(key, value, ex)
 
     def remove(self, key):
+        LOGGER.info("Deleting the key: {}".format(key))
         self.remove_value(key)
 
     def has(self, key):

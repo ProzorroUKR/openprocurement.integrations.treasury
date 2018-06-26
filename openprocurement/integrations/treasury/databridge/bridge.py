@@ -11,6 +11,7 @@ from gevent.queue import Queue
 from retrying import retry
 from functools import partial
 from iso8601 import parse_date
+from ConfigParser import ConfigParser
 
 try:
     from openprocurement_client.exceptions import ResourceGone, ResourceNotFound
@@ -193,7 +194,12 @@ class ContractingDataBridge(object):
         logger.info('Initialization finished')
 
     def config_get(self, name):
-        return self.config.get('app:api', name)
+        logger.info('config_get: {}'.format(name))
+        if isinstance(self.config, ConfigParser):
+            return self.config.get('app:api', name)
+        else:
+            return self.config['app:api'][name]
+
 
     def init_resource(self):
         """

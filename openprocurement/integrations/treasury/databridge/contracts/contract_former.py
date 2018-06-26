@@ -15,13 +15,13 @@ from xml.etree.ElementTree import Element, SubElement
 logger = logging.getLogger(__name__)
 
 
-class TenderFormer(object):
+class ContractFormer(object):
 
     def __init__(self):
         pass
 
     def is_valid(self, request):
-        schema = xmlschema.XMLSchema(os.path.join(os.getcwd(), "resources/request.xsd"))
+        schema = xmlschema.XMLSchema(os.path.join(os.getcwd(), "resources/request_contracts.xsd"))
         return schema.is_valid(request)
 
     def form_xml_to_post(self, data, request_id):
@@ -32,7 +32,7 @@ class TenderFormer(object):
         i = 0
         for file in data.documents:
             i += 1
-            new_file = SubElement(documents, 'file'+i)
+            new_file = SubElement(documents, 'file'+str(i))
             new_file.text = file
         logger.info("Request {} is valid? {}".format(request_id, self.is_valid(request)))
         return request

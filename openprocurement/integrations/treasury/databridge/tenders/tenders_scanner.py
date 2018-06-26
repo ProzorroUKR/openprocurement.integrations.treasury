@@ -18,6 +18,12 @@ from openprocurement.integrations.treasury.databridge.utils import (
     handle_esco_tenders
 )
 
+try:
+    from openprocurement_client.exceptions import ResourceGone, ResourceNotFound
+except ImportError:
+    from openprocurement_client.client import ResourceNotFound
+    from restkit.errors import ResourceGone
+
 
 from openprocurement.integrations.treasury.databridge.base_worker import BaseWorker
 from openprocurement.integrations.treasury.databridge import constants

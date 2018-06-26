@@ -53,11 +53,14 @@ class TestDatabridge(unittest.TestCase):
         self.config.set('app:api', 'contracting_api_server', 'http://localhost:6543')
         self.config.set('app:api', 'contracting_api_version', '0')
         self.config.set('app:api', 'public_tenders_api_server', 'http://localhost:6543')
+        self.config.set('app:api', 'plans_api_server', 'http://localhost:6543')
+        self.config.set('app:api', 'plans_api_version', '0')
         self.config.set('app:api', 'resource', '')
         self.config.set('app:api', 'api_token', 'bot')
         self.config.set('app:api', 'delay', '15')
         self.config.set('app:api', 'increment_step', '1')
         self.config.set('app:api', 'decrement_step', '1')
+        self.config.set('app:api', 'time_to_live', '10')
 
         with open(PWD + '/data/tender.json', 'r') as json_file:
             self.tender = json.load(json_file)
@@ -895,45 +898,7 @@ class TestDatabridge(unittest.TestCase):
         ])
         cb._put_tender_in_cache_by_contract.assert_called_once_with(tender['data']['contracts'][0], self.TENDER_ID)
 
-    def test_get_tender_contracts(self, *mocks):
-        cb = ContractingDataBridge(self.config)
-        cb._get_tender_contracts = MagicMock()
-
-        with patch('__builtin__.True', AlmostAlwaysTrue(1)):
-            cb.get_tender_contracts()
-        cb._get_tender_contracts.assert_called_once_with()
-
-        exception = IndexError()
-        cb._get_tender_contracts.side_effect = [exception]
-        with self.assertRaises(Exception) as e:
-            cb.get_tender_contracts()
-        mocks[1].warn.assert_called_once_with(
-            'Fail to handle tender contracts',
-            extra=journal_context({'MESSAGE_ID': j_msg.DATABRIDGE_EXCEPTION})
-        )
-        mocks[1].exception.assert_called_once_with(exception)
-
-    def test_get_tender_data_with_retry(self, *mocks):
-        cb = ContractingDataBridge(self.config)
-        contract = deepcopy(self.contract)
-        contract['tender_id'] = self.TENDER_ID
-        tender_data = MagicMock()
-        tender_data.data = {'owner': 'owner', 'tender_token': 'tender_token'}
-        cb.get_tender_credentials = MagicMock(return_value=tender_data)
-        cb.contracting_client.create_contract = MagicMock()
-
-        result = cb.get_tender_data_with_retry(contract)
-
-        cb.get_tender_credentials.assert_called_once_with(self.TENDER_ID)
-        mocks[1].info.assert_has_calls(call(
-            'Getting extra info for tender {}'.format(self.TENDER_ID),
-            extra=journal_context({
-                'MESSAGE_ID': j_msg.DATABRIDGE_GET_EXTRA_INFO,
-                'JOURNAL_TENDER_ID': self.TENDER_ID,
-                'JOURNAL_CONTRACT_ID': contract['id']
-            })
-        ))
-        self.assertEquals(result, tender_data)
+   
 
 
 class TestDb(unittest.TestCase):

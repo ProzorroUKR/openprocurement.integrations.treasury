@@ -52,27 +52,17 @@ class TenderFilter(BaseWorker):
                 )
                 logger.exception(e)
                 gevent.sleep(self.sleep_change_value.time_between_requests)
-
                 raise
-
             gevent.sleep(1)
     
     def _get_tender_contracts(self):
         tender_to_sync = self.filtered_tenders_queue.get()
-
         try:
             tender = self.tenders_sync_client.get_tender(
                 tender_to_sync['id'],
                 extra_headers={'X-Client-Request-ID': generate_request_id()}
             )['data']
         except Exception as e:
-            logger.warn(
-                'Fail to get tender info {}'.format(tender_to_sync['id']),
-                extra=journal_context(
-                    {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION},
-                    params={self.resource['id_key_upper']: tender_to_sync['id']}
-                )
-            )
             logger.exception(e)
             logger.info(
                 'Put tender {} back to tenders queue'.format(tender_to_sync['id']),
@@ -133,16 +123,6 @@ class TenderFilter(BaseWorker):
 
                         continue
                     except Exception as e:
-                        logger.warn(
-                            'Fail to contract existance {}'.format(contract['id']),
-                            extra=journal_context(
-                                {'MESSAGE_ID': journal_msg_ids.DATABRIDGE_EXCEPTION},
-                                params={
-                                    self.resource['id_key_upper']: tender_to_sync['id'],
-                                    'CONTRACT_ID': contract['id']
-                                }
-                            )
-                        )
                         logger.exception(e)
                         logger.info(
                             'Put tender {} back to tenders queue'.format(tender_to_sync['id']),

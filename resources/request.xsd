@@ -1,59 +1,32 @@
-<?xml version="1.0" encoding="UTF-8" ?>
-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
-
-    <xs:complexType name="request">
-        <xs:sequence>
-            <xs:element name="HNUM" type="xs:int" minOccurs="1"/>
-            <xs:element name="HTIN" type="xs:string" minOccurs="1"/>
-            <xs:element name="HLNAMEU" type="xs:string"/>
-            <xs:element name="HLNAME" type="xs:string"/>
-            <xs:element name="HPNAME" type="xs:string"/>    
-            <xs:element name="HFNAME" type="xs:string"/>
-            <xs:element name="ID" type="xs:string" minOccurs="1"/>
-            <xs:element name="HFILL" type="xs:dateTime" minOccurs="1"/>
-        </xs:sequence>
-    </xs:complexType>
-
-    <xs:element name="request" type="request"/>
-
-</xs:schema>
-
 <?xml version="1.0" encoding="UTF-8"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
-<root method_name="NewContracts">
-      <record id="Унікальний код рядку даних">
-         <ContractId> Унікальний системний ідентифікатор договору про закупівлю </ContractId>
-         <TenderId> Унікальний ідентифікатор закупівлі </TenderId>
-         <IdentifierId> Код згідно з ЄДРПОУ замовника </IdentifierId>
-         <ContractNumber> Номер договору </ContractNumber>
-         <DateSigned>Дата договору</DateSigned>
-         <ContractsAmount> Сума договору </ContractsAmount>
-         <Currency> Код валюти договору </Currency>
-         <ValueAddedTaxIncluded> Ознака ПДВ </ValueAddedTaxIncluded>
-         <Documents> PDF-файли відсканованого договору
-    <file1> Файл 1 </file1>
-    <file2> Файл 2 </file2>
-    …
-    <fileN> Файл N </fileN>
-          </Documents>
-         <Report> Звіт про результати проведення процедури закупівлі </Report>
-         <Plans> Річний план закупівель по даному клієнту(ЕДРПОУ)
-    <String1> Стрічка 1 </String1>
-    < String2> Стрічка 2 </ String2>
-    …
-    < StringN> Стрічка N </ StringN>
-          </Plans>
-         <Bids> Учасники процедури
-    <Bid1> Учасник 1 </Bid1>
-    <Bid2> Учасник 2 </Bid2>
-    …
-    <BidN> Учасник N </BidN>
-          </Bids>
-      </record>
-      <record id="…">
-      …
-      </record>
-      …
-</root>
-
+    <xs:complexType name="root">
+        <xs:sequence>
+            <xs:element name="ContractId" description="Унікальний системний ідентифікатор договору про закупівлю" type="xs:string"/>
+            <xs:element name="TenderId" description="Унікальний ідентифікатор закупівлі" type="xs:string"/>
+            <xs:element name="IdentifierId" description="Код згідно з ЄДРПОУ замовника" type="xs:string"/>
+            <xs:element name="ContractNumber" description="Номер договору" type="xs:string"/>
+            <xs:element name="DateSigned" description="Дата договору" type="xs:dateTime"/>
+            <xs:element name="ContractsAmount" description="Сума договору" type="xs:string"/>
+            <xs:element name="Currency" description="Код валюти договору" type="xs:string"/>
+            <xs:element name="ValueAddedTaxIncluded" description="Ознака ПДВ" type="xs:string"/>
+            <xs:element name="Documents">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element maxOccurs="unbounded" ref="File"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="File" type="xs:string"/>
+            <xs:element name="Bids">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element maxOccurs="unbounded" ref="Bid"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Bid" type="xs:string"/>
+            <xs:element name="Report" type="xs:string"/>
+        </xs:sequence>
+    </xs:complexType>
 </xs:schema>
