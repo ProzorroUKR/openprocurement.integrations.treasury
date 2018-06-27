@@ -13,7 +13,10 @@ from openprocurement.integrations.treasury.databridge.journal_msg_ids import DAT
 from openprocurement.integrations.treasury.databridge.utils import journal_context, generate_request_id, \
     more_contracts, valid_contract, document_of_change
 from openprocurement.integrations.treasury.databridge.caching import contract_key
+from openprocurement.integrations.treasury.databridge.contracts.contract_former import ContractFormer
 from restkit import ResourceError
+from collections import namedtuple
+from xml.etree.ElementTree import tostring
 from retrying import retry
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,7 @@ class ContractScanner(BaseWorker):
 
         # blockers
         self.initialization_event = Event()
+        self.contract_xml_former = ContractFormer()
         self.sleep_change_value = sleep_change_value
 
     @retry(stop_max_attempt_number=5, wait_exponential_multiplier=retry_mult)
@@ -111,6 +115,7 @@ class ContractScanner(BaseWorker):
         self.services_not_available.wait()
         logger.info('Start backward data sync worker...')
         params = {'opt_fields': 'status, changes, documents, dateSigned', 'descending': 1, 'mode': '_all_', 'feed': 'changes'}
+        # import pdb; pdb.set_trace()
         try:
             self.put_contracts_to_process(params, "backward")
         except Exception as e:
@@ -123,11 +128,11 @@ class ContractScanner(BaseWorker):
 
     def put_contracts_to_process(self, params, direction):
         for contract in self.get_contracts(params=params, direction=direction):
+            # import pdb; pdb.set_trace()
             logger.info('Backward sync: Put contract {} to process...'.format(contract['id']),
                         extra=journal_context({"MESSAGE_ID": DATABRIDGE_CONTRACT_PROCESS},
                                               {"contract_ID": contract['id']}))
             self.process_tracker.put_contract(contract['id'], contract['dateModified'])
-            
             self.filtered_contracts_queue.put(contract)
 
     def _start_jobs(self):

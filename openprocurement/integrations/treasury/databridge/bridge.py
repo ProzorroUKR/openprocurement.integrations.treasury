@@ -1033,8 +1033,8 @@ class ContractingDataBridge(object):
 
     def _start_jobs(self):
         self.jobs = {
-                    #  'tender_scanner': self.tender_scanner(),
-                    #  'tender_filter': self.tender_filter(),
+                     'tender_scanner': self.tender_scanner(),
+                     'tender_filter': self.tender_filter(),
                      'contract_scanner': self.contract_scanner(),
                      'contract_filter': self.contract_filter(),
                     #  'plan_scanner': self.plan_scanner(),

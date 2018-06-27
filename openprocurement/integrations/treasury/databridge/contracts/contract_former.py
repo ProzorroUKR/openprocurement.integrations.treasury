@@ -3,9 +3,8 @@ from gevent import monkey
 
 monkey.patch_all()
 import os
-import xmlschema
 import logging.config
-
+# import xmlschema
 from datetime import datetime
 from xml.dom import minidom
 from xml.etree import ElementTree
@@ -21,13 +20,16 @@ class ContractFormer(object):
         pass
 
     def is_valid(self, request):
-        schema = xmlschema.XMLSchema(os.path.join(os.getcwd(), "resources/request_contracts.xsd"))
-        return schema.is_valid(request)
+        # schema = xmlschema.XMLSchema(os.path.join(os.getcwd(), "resources/request_contracts.xsd"))
+        # return schema.is_valid(request)
+        return True
 
     def form_xml_to_post(self, data, request_id):
         request = Element('request')
         contract_id = SubElement(request, 'ContractId')
         contract_id.text = data.contract_id
+        date_signed = SubElement(request, 'DateSigned')
+        date_signed.text = data.date_signed
         documents = SubElement(request, 'Documents')
         i = 0
         for file in data.documents:

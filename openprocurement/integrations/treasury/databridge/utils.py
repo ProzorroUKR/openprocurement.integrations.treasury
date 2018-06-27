@@ -8,7 +8,7 @@ from uuid import uuid4
 from datetime import datetime, timedelta, time
 
 from ConfigParser import NoOptionError
-from json import loads
+from json import loads, dumps
 from decimal import Decimal
 from pytz import timezone
 from restkit import ResourceError
@@ -368,7 +368,7 @@ def change_documents(contract):
         logger.info('documentOf {}'.format(document['documentOf']))
         if document['documentOf'] == 'change':
             if exists_change_with_same_id(contract, document['relatedItem']):
-                res.append(document)
+                res.append(dumps(document))
     return res
 
 def exists_change_with_same_id(contract, relatedItem):

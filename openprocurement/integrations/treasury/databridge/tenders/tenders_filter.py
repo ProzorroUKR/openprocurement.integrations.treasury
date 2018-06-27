@@ -7,10 +7,13 @@ import logging
 from gevent import spawn
 from openprocurement.integrations.treasury.databridge.base_worker import BaseWorker
 from datetime import datetime
+from xml.etree.ElementTree import tostring
 from openprocurement.integrations.treasury.databridge.utils import (
     generate_request_id, journal_context,
     fill_base_contract_data, handle_common_tenders, handle_esco_tenders)
+from collections import namedtuple
 from openprocurement.integrations.treasury.databridge import journal_msg_ids
+from openprocurement.integrations.treasury.databridge.tenders.tender_former import TenderFormer
 try:
     from openprocurement_client.exceptions import ResourceGone, ResourceNotFound
 except ImportError:
@@ -30,6 +33,7 @@ class TenderFilter(BaseWorker):
         self.resource = resource
         self.delay = delay
         self.process_tracker = process_tracker
+        self.tender_former = TenderFormer()
         self.cache_db = cache_db
         # init clients
         self.tenders_sync_client = tenders_sync_client
@@ -157,7 +161,19 @@ class TenderFilter(BaseWorker):
                         handle_esco_tenders(contract, tender)
                     else:
                         handle_common_tenders(contract, tender)
-
+                    logger.info("CONTRAAAAAAAAAAAAAAAACT {}".format(contract))
+                    logger.info("TENDEEEEER {}".format(tender))
+                    TenderData = namedtuple('TenderData', ['tender_id', 'contract_id', 'identifier_id', 'contract_number', 'date_signed', 
+                                                           'contracts_amount', 'currency', 'vat_included', 'documents'])
+                    tender_data = TenderData(tender['id'], tender['contracts'][0]['id'], 
+                                             tender['procuringEntity']['identifier']['id'], tender['contracts'][0]['contractNumber'], 
+                                             tender['contracts'][0]['dateSigned'], tender['contracts'][0]['value']['amount'], 
+                                             tender['contracts'][0]['value']['currency'], tender['contracts'][0]['value']['valueAddedTaxIncluded'],
+                                             tender['contracts'][0]['documents'])
+                    tender_xml = self.tender_former.form_xml_to_post(tender_data, generate_request_id())
+                    with open('packets/tender_'+str(tender['id'])+'.xml', 'w') as file:
+                        file.write(tostring(tender_xml, encoding='UTF-8'))
+                    logger.info('tender_xml: {}'.format(tostring(tender_xml, encoding='UTF-8')))
                     self.handicap_contracts_queue.put(contract)
 
     def _put_tender_in_cache_by_contract(self, contract, tender_id):

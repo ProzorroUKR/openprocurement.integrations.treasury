@@ -3,9 +3,14 @@ from gevent import monkey
 
 monkey.patch_all()
 import gevent
+import os.path
 import logging
 from gevent import spawn
+from collections import namedtuple
+
+from xml.etree.ElementTree import tostring
 from openprocurement.integrations.treasury.databridge.base_worker import BaseWorker
+from openprocurement.integrations.treasury.databridge.contracts.contract_former import ContractFormer
 from datetime import datetime
 from openprocurement.integrations.treasury.databridge.utils import (
     generate_request_id, journal_context, document_of_change,
@@ -35,7 +40,7 @@ class ContractFilter(BaseWorker):
         self.contracts_sync_client = contracts_sync_client
         self.contracting_client = contracting_client
         self.contracting_client_ro = contracting_client_ro
-
+        self.contract_xml_former = ContractFormer()
         # init queues for workers
         self.filtered_contracts_queue = filtered_contracts_queue
         self.sleep_change_value = sleep_change_value
@@ -74,12 +79,22 @@ class ContractFilter(BaseWorker):
         gevent.sleep(1)
 
     def _put_contract_in_cache_by_contract(self, contract, contract_id):
-        # logger.info('Putting info forward {}'.format(contract))
-        data_to_put_forward = (contract['id'], contract['dateSigned'], document_of_change(contract))
-        logger.info('data to put forward {}'.format(data_to_put_forward))
+        ContractData = namedtuple('ContractData', ['contract_id', 'date_signed', 'documents'])
+        # contract_data = ContractData(contract['id'], contract['dateSigned'], document_of_change(contract))
+        # logger.info('data to put forward {}'.format(contract_data))
+        # contract_xml = self.contract_xml_former.form_xml_to_post(contract_data, generate_request_id())
+        # logger.info('contract_xml: {}'.format(contract_xml))
+        if document_of_change(contract):
+            contract_data = ContractData(contract['id'], contract['dateSigned'], document_of_change(contract))
+            logger.info('data to put forward {}'.format(contract_data))
+            contract_xml = self.contract_xml_former.form_xml_to_post(contract_data, generate_request_id())
+            logger.info('contract_xml: {}'.format(tostring(contract_xml, encoding='UTF-8')))
+            with open('packets/contract_'+str(contract['id'])+'.xml', 'w') as file:
+                file.write(tostring(contract_xml, encoding='UTF-8'))
         date_modified = self.basket.get(contract['id'])
         if date_modified:
             self.cache_db.put(contract_id, date_modified)
+        
         self.basket.pop(contract['id'], None)
 
     def _start_jobs(self):
